@@ -1,0 +1,25 @@
+{
+  "name": "blockforge",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "node tests/ember.test.mjs && node tests/limits.test.mjs && cd server && node test.mjs",
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "docs": "node scripts/gen-docs.mjs",
+    "e2e": "node tests/e2e.mjs && node tests/e2e2.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "playwright": "1.47",
+    "vite": "^5.4.21"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  }
+}

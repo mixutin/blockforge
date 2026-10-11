@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Blockforge — build with Ember blocks</title>
+<link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+<meta name="description" content="Blockforge: a block-based visual programming studio with its own language, Ember." />
+</head>
+<body>
+<header id="topbar">
+  <div class="brand"><span id="logo"></span><b>Block<span>forge</span></b></div>
+  <div class="menus">
+    <button id="btn-new" title="New project">New</button>
+    <button id="btn-open" title="Open a .bforge.json file">Open</button>
+    <button id="btn-save" title="Download project as JSON">Save</button>
+    <div class="dropdown"><button id="btn-examples">Examples ▾</button><div class="dd-menu" id="examples-menu"></div></div>
+    <button id="btn-cloud" title="Cloud projects (needs account)">☁ Cloud</button>
+    <input type="file" id="file-input" accept=".json,application/json" hidden />
+  </div>
+  <input id="project-name" spellcheck="false" aria-label="Project name" />
+  <div class="spacer"></div>
+  <span id="save-status"></span>
+  <button id="btn-account" class="ghost">Sign in</button>
+  <button id="btn-theme" class="ghost" title="Toggle light/dark theme">◐</button>
+  <div class="run">
+    <button id="btn-ignite" title="Ignite (start all 'when Ignite pressed' scripts)"><span id="ignite-icon"></span>Ignite</button>
+    <button id="btn-stop" title="Stop everything"><svg viewBox="0 0 20 20" width="16" height="16"><polygon points="6,1 14,1 19,6 19,14 14,19 6,19 1,14 1,6" fill="#ef4f5f"/></svg></button>
+    <button id="btn-full" title="Fullscreen stage">⛶</button>
+    <button id="btn-player" title="Run in the isolated sandboxed player">▶ Player</button>
+  </div>
+</header>
+<main id="app">
+  <nav id="cats"></nav>
+  <aside id="palette" aria-label="Block palette"></aside>
+  <section id="center">
+    <div class="tabs">
+      <button class="tab on" data-tab="blocks">Blocks</button>
+      <button class="tab" data-tab="text">Ember text</button>
+      <button class="tab" data-tab="costumes" id="tab-costumes">Costumes</button>
+      <div class="spacer"></div>
+      <span id="editing-label"></span>
+    </div>
+    <div class="pane on" id="pane-blocks">
+      <div id="ws"><div id="ws-canvas"></div>
+        <div id="ws-empty"><div>Drag blocks here from the palette<br><small>Start with <b>when Ignite pressed</b> from Events</small></div></div>
+      </div>
+      <div class="zoom"><button id="z-in" title="Zoom in">+</button><button id="z-reset" title="Reset zoom">=</button><button id="z-out" title="Zoom out">−</button><button id="z-clean" title="Clean up blocks">⇅</button></div>
+    </div>
+    <div class="pane" id="pane-text">
+      <div class="text-bar">
+        <button id="text-refresh">⟲ From blocks</button>
+        <button id="text-apply" class="primary">Apply to blocks →</button>
+        <span id="text-status"></span>
+        <div class="spacer"></div>
+        <a href="#" id="text-help-btn">Ember syntax</a>
+      </div>
+      <div class="code-wrap"><pre id="code-hl" aria-hidden="true"></pre><textarea id="code" spellcheck="false" wrap="off"></textarea></div>
+      <div id="text-help" hidden>
+<b>Ember quick reference</b>
+<pre>on_ignite { ... }              // hat: when Ignite pressed
+on_key("space") { ... }        on_click { ... }     on_message("go") { ... }
+move(10)  turn_right(15)  go_xy(0, 0)  say_for("Hi", 2)  wait(1)
+repeat(10) { ... }   forever { ... }   if touching("_edge_") { ... } else { ... }
+set(@score, 0)   change(@score, 1)   list_add("x", @@items)
+@score  (variable)   @@items (list)    x_pos  mouse_x  timer   (reporters)
+1 + 2 * 3   a &lt; b   a = b   a and b   not a   join("a", "b")
+define! polygon(sides, len) { repeat(sides) { move(len)  turn_right(360 / sides) } }
+polygon(6, 40)                 // call your own block
+script { ... }                 // loose stack without a hat</pre></div>
+    </div>
+    <div class="pane" id="pane-costumes">
+      <div class="costume-list">
+        <div id="costume-tiles"></div>
+        <div class="costume-add">
+          <button id="cos-paint">🖌 Paint new</button>
+          <button id="cos-lib">▦ Library</button>
+          <button id="cos-upload">⤒ Upload</button>
+          <input type="file" id="cos-file" accept="image/*" hidden />
+        </div>
+      </div>
+      <div class="paint">
+        <div id="paint-tools" class="paint-tools">
+          <button data-tool="brush" class="on" title="Brush">✎</button>
+          <button data-tool="eraser" title="Eraser">⌫</button>
+          <button data-tool="line" title="Line">╱</button>
+          <button data-tool="rect" title="Rectangle">▭</button>
+          <button data-tool="ellipse" title="Ellipse">◯</button>
+          <button data-tool="fill" title="Fill">🪣</button>
+          <label title="Fill shapes"><input type="checkbox" id="paint-fill" checked /> fill</label>
+          <input type="color" id="paint-color" value="#FF8C42" title="Color" />
+          <input type="range" id="paint-size" min="1" max="60" value="8" title="Brush size" />
+          <button id="paint-undo" title="Undo">↶</button>
+          <button id="paint-clear" title="Clear">✕</button>
+        </div>
+        <div class="paint-stage"><canvas id="paint-canvas"></canvas><div class="crosshair"></div></div>
+        <p class="hint">The crosshair is the rotation center. Editing converts the costume to a bitmap.</p>
+      </div>
+    </div>
+  </section>
+  <section id="right">
+    <div id="stage-wrap">
+      <canvas id="stage"></canvas>
+      <div id="overlay">
+        <div id="monitors"></div><div id="widgets"></div>
+        <div id="ask" hidden><div id="ask-q"></div><form id="ask-form"><input id="ask-input" autocomplete="off" /><button>✓</button></form></div>
+      </div>
+      <button id="exit-full" title="Exit fullscreen">✕</button>
+    </div>
+    <div id="console" class="collapsed"><div class="con-head"><b>Console</b><span id="con-count"></span><div class="spacer"></div><button id="con-clear" class="ghost">Clear</button><button id="con-toggle" class="ghost">▾</button></div><pre id="console-out"></pre></div>
+    <div id="sprite-info"></div>
+    <div id="targets">
+      <div id="sprite-list"></div>
+      <div id="stage-tile"></div>
+    </div>
+  </section>
+</main>
+<div id="drag-layer"></div>
+<div id="modal-root"></div>
+<div id="toast"></div>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
