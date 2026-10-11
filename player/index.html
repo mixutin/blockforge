@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'none'; base-uri 'none'; form-action 'none'" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="referrer" content="no-referrer" />
+<title>Blockforge Player</title>
+<link rel="stylesheet" href="./player.css" />
+</head>
+<body>
+<div id="bar">
+  <button id="ignite" title="Ignite">🔥 Ignite</button>
+  <button id="stop" title="Stop">■</button>
+  <span id="title">Blockforge Player</span>
+  <button id="full" title="Fullscreen">⛶</button>
+</div>
+<div id="wrap">
+  <canvas id="stage"></canvas>
+  <div id="overlay"><div id="monitors"></div><div id="widgets"></div>
+    <div id="ask" hidden><div id="ask-q"></div><form id="ask-form"><input id="ask-input" autocomplete="off" /><button>✓</button></form></div>
+  </div>
+  <div id="msg">Waiting for a project…</div>
+</div>
+<pre id="console" hidden></pre>
+<script src="./player.js" defer></script>
+</body>
+</html>
