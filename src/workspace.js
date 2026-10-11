@@ -109,7 +109,7 @@ export class Blocks {
     this.updateRunning(this.app.runningScripts());
     document.getElementById('ws-empty').style.display = t.scripts.length ? 'none' : 'flex';
   }
-  updateRunning(set) { for (const [s, el] of this.scriptEls) el.classList.toggle('running', set.has(s)); }
+  updateRunning(set) { for (const [s, el] of this.scriptEls) { const on = set.has(s); if (el._running !== on) { el._running = on; el.classList.toggle('running', on); } } }   // DOM write only on change
 
   renderPalette() {
     const t = this.target, P = this.palette, scroll = P.scrollTop; P.innerHTML = '';
@@ -158,11 +158,14 @@ export class Blocks {
     const st = { el, fromPalette, x0: e.clientX, y0: e.clientY, dragging: false };
     const move = ev => {
       if (!st.dragging && Math.hypot(ev.clientX - st.x0, ev.clientY - st.y0) > 4) { st.dragging = true; this.beginDrag(st, ev); }
-      if (st.dragging) this.moveDrag(st, ev);
+      if (st.dragging) {               // at most one drag update per animation frame (pointermove can fire >100/s)
+        st.lastEv = ev; if (!st.raf) st.raf = requestAnimationFrame(() => { st.raf = 0; if (st.lastEv) this.moveDrag(st, st.lastEv); });
+      }
     };
     const up = ev => {
       window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up);
-      if (st.dragging) this.endDrag(st, ev); else this.click(el, fromPalette);
+      if (st.raf) { cancelAnimationFrame(st.raf); st.raf = 0; }
+      if (st.dragging) { this.moveDrag(st, ev); this.endDrag(st, ev); } else this.click(el, fromPalette);
     };
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
   }
@@ -187,19 +190,23 @@ export class Blocks {
     // drag visual
     this.dragLayer.innerHTML = ''; const holder = h('div', 'drag-holder');
     holder.appendChild(st.isRep ? this.renderBlock(list[0], { palette: false }) : this.renderStack(list, { palette: false }));
-    holder.style.transform = `scale(${this.zoom})`; this.dragLayer.appendChild(holder); st.holder = holder;
+    holder.style.left = '0px'; holder.style.top = '0px'; holder.style.willChange = 'transform';
+    holder.style.transform = `translate3d(${(st.x0 - st.offX)}px, ${(st.y0 - st.offY)}px, 0) scale(${this.zoom})`; this.dragLayer.appendChild(holder); st.holder = holder;
+    st.hh = holder.getBoundingClientRect().height / this.zoom;   // measured once (no layout reads while moving)
     if (!st.fromPalette) this.render();
     st.targets = this.collectTargets(st);
     this.canvas.appendChild(this.indicator); this.indicator.style.display = 'none';
     document.body.classList.add('dragging');
   }
+  // (helpers for the initial drag-holder position)
   collectTargets(st) {
-    const out = [], toC = r => ({ l: (r.left - this.canvas.getBoundingClientRect().left) / this.zoom, t: (r.top - this.canvas.getBoundingClientRect().top) / this.zoom, r: (r.right - this.canvas.getBoundingClientRect().left) / this.zoom, b: (r.bottom - this.canvas.getBoundingClientRect().top) / this.zoom });
+    const cr = this.canvas.getBoundingClientRect(), z = this.zoom;   // read the canvas rect once, not per coordinate
+    const out = [], toC = r => ({ l: (r.left - cr.left) / z, t: (r.top - cr.top) / z, r: (r.right - cr.left) / z, b: (r.bottom - cr.top) / z });
     const list = st.list, first = list[0], last = list[list.length - 1];
     if (st.isRep) {
       for (const s of this.canvas.querySelectorAll('.in.num, .in.txt, .bslot')) {
         const slot = s._slot; if (!slot) continue; if (slot.kind === 'b' && !st.isBool) continue;
-        out.push({ kind: 'slot', slot, rect: toC(s.getBoundingClientRect()) });
+        out.push({ kind: 'slot', slot, el: s, rect: toC(s.getBoundingClientRect()) });
       }
       return out;
     }
@@ -221,8 +228,9 @@ export class Blocks {
     return out;
   }
   moveDrag(st, ev) {
-    st.holder.style.left = (ev.clientX - st.offX) + 'px'; st.holder.style.top = (ev.clientY - st.offY) + 'px';
-    const p = this.toCanvas(ev.clientX - st.offX, ev.clientY - st.offY); const hr = st.holder.getBoundingClientRect(); const hh = hr.height / this.zoom;
+    // writes only (transform: compositor-friendly, no layout); all geometry was measured at drag start
+    st.holder.style.transform = `translate3d(${ev.clientX - st.offX}px, ${ev.clientY - st.offY}px, 0) scale(${this.zoom})`;
+    const p = this.toCanvas(ev.clientX - st.offX, ev.clientY - st.offY); const hh = st.hh;
     st.overPalette = this.isOverPalette(ev);
     let best = null, bd = 30;
     if (!st.overPalette) for (const t of st.targets) {
@@ -232,12 +240,13 @@ export class Blocks {
       if (d < bd) { bd = d; best = t; }
     }
     st.best = best; st.pos = p; st.h = hh;
-    document.querySelectorAll('.slot-hover').forEach(x => x.classList.remove('slot-hover'));
-    const ind = this.indicator;
-    if (best && best.kind === 'stack') { ind.style.display = 'block'; ind.style.left = best.x + 'px'; ind.style.top = (best.y - 3) + 'px'; }
-    else ind.style.display = 'none';
-    if (best && best.kind === 'slot') { const el = [...this.canvas.querySelectorAll('.in.num, .in.txt, .bslot')].find(e => e._slot === best.slot); el && el.classList.add('slot-hover'); }
-    this.palette.classList.toggle('trash', !!st.overPalette);
+    const hoverEl = best && best.kind === 'slot' ? best.el : null;
+    if (st.hoverEl !== hoverEl) { st.hoverEl?.classList.remove('slot-hover'); hoverEl?.classList.add('slot-hover'); st.hoverEl = hoverEl; }
+    const ind = this.indicator, key = best && best.kind === 'stack' ? best.x + ',' + best.y : '';
+    if (st.indKey !== key) { st.indKey = key;
+      if (key) { ind.style.display = 'block'; ind.style.transform = `translate(${best.x}px, ${best.y - 3}px)`; ind.style.left = '0px'; ind.style.top = '0px'; }
+      else ind.style.display = 'none'; }
+    if (st.trash !== !!st.overPalette) { st.trash = !!st.overPalette; this.palette.classList.toggle('trash', st.trash); }
   }
   isOverPalette(ev) { const r = this.palette.getBoundingClientRect(); return ev.clientX >= r.left && ev.clientX <= r.right && ev.clientY >= r.top && ev.clientY <= r.bottom; }
   endDrag(st, ev) {

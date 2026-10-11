@@ -1,10 +1,11 @@
-// Blockforge sandboxed player. Runs inside <iframe sandbox="allow-scripts"> on the runtime origin.
+// Kindlr sandboxed player. Runs inside <iframe sandbox="allow-scripts"> on the runtime origin.
 // Protocol: player -> parent: {type:'bf-hello', v:1} + MessagePort (targetOrigin = an allowed editor origin, never '*').
 // All further traffic goes over the private MessagePort. Every message is schema-checked in both directions.
 import './player.css';
 import { Runtime } from './runtime.js';
 import { getImg, W, H } from './stage.js';
 import { validateProject, LIMITS, capStr } from './limits.js';
+import { has, get, put, dict, RESERVED_NAMES } from './safe.js';
 import { syncWidgets } from './widgets.js';
 
 /* global __EDITOR_ORIGINS__ */
@@ -32,7 +33,7 @@ class PlayerApp {
     document.addEventListener('keyup', e => this.runtime.keyUp(e));
     $('ask-form').addEventListener('submit', e => { e.preventDefault(); const cb = this._askCb; this.hideAsk(); cb && cb($('ask-input').value); });
     new ResizeObserver(() => this.resize()).observe($('wrap')); this.resize();
-    const loop = () => { try { if (this._project) { this.runtime.step(); const s = this.scale * devicePixelRatio; this.ctx.setTransform(s, 0, 0, s, 0, 0); this.runtime.render(this.ctx); this.renderMonitors(); syncWidgets($('widgets'), this.runtime); $('ignite').classList.toggle('active', this.runtime.isRunning()); } } catch (e) { console.warn(e); } requestAnimationFrame(loop); };
+    const loop = () => { try { if (this._project) { this.runtime.step(); if (this.runtime.needsRender()) { const s = this.scale * devicePixelRatio; this.ctx.setTransform(s, 0, 0, s, 0, 0); this.runtime.render(this.ctx); } this.renderMonitors(); syncWidgets($('widgets'), this.runtime); $('ignite').classList.toggle('active', this.runtime.isRunning()); } } catch (e) { console.warn(e); } requestAnimationFrame(loop); };
     requestAnimationFrame(loop);
   }
   get project() { return this._project; }
@@ -43,7 +44,7 @@ class PlayerApp {
   }
   load(json) {
     const p = validateProject(json);
-    for (const t of p.targets) { Object.assign(t, { x: 0, y: 0, direction: 90, size: 100, visible: true, costume: 0, rotationStyle: 'all around', layer: 0, variables: {}, lists: {}, scripts: [], costumes: [], ...t }); t.effects = {}; t.bubble = null; t.costumes.forEach(c => getImg(c.src, () => (this.runtime.redraw = true))); }
+    for (const t of p.targets) { Object.assign(t, { x: 0, y: 0, direction: 90, size: 100, visible: true, costume: 0, rotationStyle: 'all around', layer: 0, scripts: [], costumes: [], ...t, variables: dict(t.variables), lists: dict(t.lists) }); t.effects = dict(); t.bubble = null; t.costumes.forEach(c => getImg(c.src, () => (this.runtime.redraw = true))); }
     p.monitors ||= []; this.storage = Object.assign(Object.create(null), p.storage || {}); if (this._project) this.runtime.stopAll(); this._project = p; this.runtime.stopAll(); this.runtime.penCtx.clearRect(0, 0, W, H);
     $('title').textContent = p.name || 'Untitled'; $('msg').hidden = true; $('monitors').innerHTML = ''; this._mon = new Map();
   }
@@ -53,11 +54,12 @@ class PlayerApp {
   showReport() {}
   print(t) { const c = $('console'); c.hidden = false; const d = document.createElement('div'); d.textContent = String(t).slice(0, 2000); c.appendChild(d); while (c.childNodes.length > LIMITS.maxConsoleLines) c.firstChild.remove(); c.scrollTop = c.scrollHeight; this.resize(); }
   clearConsole() { $('console').innerHTML = ''; }
-  storeGet(k) { return this.storage[k]; }
+  storeGet(k) { return get(this.storage, k); }
   storeSet(k, v) { // persisted only through the editor; the player never makes network calls
     if (typeof v !== 'number' && typeof v !== 'boolean') v = capStr(typeof v === 'object' ? JSON.stringify(v) : String(v ?? ''));
-    if (!(k in this.storage) && Object.keys(this.storage).length >= LIMITS.maxStorageKeys) return;
-    this.storage[k] = v; send({ type: 'store', key: k, value: v });
+    if (typeof k !== 'string' || RESERVED_NAMES.has(k)) return;
+    if (!has(this.storage, k) && Object.keys(this.storage).length >= LIMITS.maxStorageKeys) return;
+    put(this.storage, k, v); send({ type: 'store', key: k, value: v });
   }
   setMonitor(type, name, t, visible) {
     const owner = !t.isStage && Object.prototype.hasOwnProperty.call(type === 'list' ? t.lists : t.variables, name) ? (t.base || t).name : null;
@@ -89,12 +91,12 @@ function onPortMessage(e) {
   } catch (err) { send({ type: 'error', message: String(err.message || err).slice(0, 300) }); }
 }
 function handshake() {
-  if (window.parent === window) { $('msg').textContent = 'Blockforge Player — open a project from the Blockforge editor.'; return; }
+  if (window.parent === window) { $('msg').textContent = 'Kindlr Player — open a project from the Kindlr editor.'; return; }
   // Determine the embedding editor's origin and only talk to it if it is allow-listed.
   let parentOrigin = null;
   try { parentOrigin = location.ancestorOrigins?.[0] || null; } catch (e) { }
   if (!parentOrigin && ALLOWED.length === 1) parentOrigin = ALLOWED[0];
-  if (!parentOrigin || !ALLOWED.includes(parentOrigin)) { $('msg').textContent = 'This player can only be embedded by the Blockforge editor.'; return; }
+  if (!parentOrigin || !ALLOWED.includes(parentOrigin)) { $('msg').textContent = 'This player can only be embedded by the Kindlr editor.'; return; }
   const ch = new MessageChannel(); port = ch.port1; port.onmessage = onPortMessage;
   window.parent.postMessage({ type: 'bf-hello', v: 1 }, parentOrigin, [ch.port2]);
 }

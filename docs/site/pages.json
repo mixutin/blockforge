@@ -1,0 +1,171 @@
+{
+ "languages": {
+  "en": "English",
+  "fi": "Suomi"
+ },
+ "default": "en",
+ "pages": [
+  {
+   "slug": "home",
+   "file": {
+    "en": "../index.md"
+   }
+  },
+  {
+   "slug": "getting-started",
+   "file": {
+    "en": "../getting-started.md"
+   }
+  },
+  {
+   "slug": "tutorials",
+   "file": {
+    "en": "../tutorials/index.md"
+   }
+  },
+  {
+   "slug": "tutorials-clicker",
+   "file": {
+    "en": "../tutorials/clicker.md"
+   }
+  },
+  {
+   "slug": "tutorials-quiz",
+   "file": {
+    "en": "../tutorials/quiz.md"
+   }
+  },
+  {
+   "slug": "tutorials-platformer",
+   "file": {
+    "en": "../tutorials/platformer.md"
+   }
+  },
+  {
+   "slug": "tutorials-notes-app",
+   "file": {
+    "en": "../tutorials/notes-app.md"
+   }
+  },
+  {
+   "slug": "blocks",
+   "file": {
+    "en": "../blocks/index.md"
+   }
+  },
+  {
+   "slug": "blocks-control",
+   "file": {
+    "en": "../blocks/control.md"
+   }
+  },
+  {
+   "slug": "blocks-data",
+   "file": {
+    "en": "../blocks/data.md"
+   }
+  },
+  {
+   "slug": "blocks-events",
+   "file": {
+    "en": "../blocks/events.md"
+   }
+  },
+  {
+   "slug": "blocks-game",
+   "file": {
+    "en": "../blocks/game.md"
+   }
+  },
+  {
+   "slug": "blocks-lists",
+   "file": {
+    "en": "../blocks/lists.md"
+   }
+  },
+  {
+   "slug": "blocks-looks",
+   "file": {
+    "en": "../blocks/looks.md"
+   }
+  },
+  {
+   "slug": "blocks-motion",
+   "file": {
+    "en": "../blocks/motion.md"
+   }
+  },
+  {
+   "slug": "blocks-myblocks",
+   "file": {
+    "en": "../blocks/myblocks.md"
+   }
+  },
+  {
+   "slug": "blocks-operators",
+   "file": {
+    "en": "../blocks/operators.md"
+   }
+  },
+  {
+   "slug": "blocks-pen",
+   "file": {
+    "en": "../blocks/pen.md"
+   }
+  },
+  {
+   "slug": "blocks-program",
+   "file": {
+    "en": "../blocks/program.md"
+   }
+  },
+  {
+   "slug": "blocks-sensing",
+   "file": {
+    "en": "../blocks/sensing.md"
+   }
+  },
+  {
+   "slug": "blocks-sound",
+   "file": {
+    "en": "../blocks/sound.md"
+   }
+  },
+  {
+   "slug": "blocks-variables",
+   "file": {
+    "en": "../blocks/variables.md"
+   }
+  },
+  {
+   "slug": "script",
+   "file": {
+    "en": "../script/index.md"
+   }
+  },
+  {
+   "slug": "script-builtins",
+   "file": {
+    "en": "../script/builtins.md"
+   }
+  },
+  {
+   "slug": "mapping",
+   "file": {
+    "en": "../mapping.md"
+   }
+  },
+  {
+   "slug": "sharing",
+   "file": {
+    "en": "../sharing.md"
+   }
+  },
+  {
+   "slug": "api",
+   "file": {
+    "en": "../api.md"
+   }
+  }
+ ]
+}

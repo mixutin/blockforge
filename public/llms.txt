@@ -1,0 +1,712 @@
+# Kindlr — complete reference for AI models
+
+> Kindlr (formerly Blockforge) is a browser programming studio. Programs are written as drag-and-drop Kindlr Blocks or as text in Kindlr Script (formerly Ember); both are the same block tree, run by one sandboxed tree-walking interpreter (no eval). Mascot: Sparky. Files: .kindlr = whole project (JSON), .kls = Kindlr Script for one sprite. Source: https://github.com/mixutin/kindlr
+
+When you write Kindlr Script: every statement must be inside a hat script (on_ignite { … }); variables are @name, lists @@name; custom blocks (define) do not return values; a bare unknown name is read as a custom-block input (empty outside its define), so always prefix variables with @; menu arguments are strings ("space", "_edge_", "_mouse_", "_random_", "_myself_", "_stage_").
+
+# Kindlr Script reference
+
+Kindlr Script is the text form of Kindlr Blocks. Every line of text is one block. This page explains the whole language. For every built-in command see [Built-in functions]; for the block ↔ text table see [Mapping].
+
+## 1. Programs and scripts
+
+A sprite (or the Stage) has a list of **scripts**. Every script starts with a **hat** and has a body in `{ }`:
+
+```kindlr
+on_ignite {
+  say("Hello!")
+}
+```
+
+Hats (events):
+
+| Hat | Runs when… |
+|---|---|
+| `on_ignite { }` | 🔥 Ignite is pressed |
+| `on_key("space") { }` | a key is pressed (`"any"`, `"up arrow"`, `"a"`, `"5"` …) |
+| `on_click { }` | this sprite is clicked (sprites) |
+| `on_stage_click { }` | the stage is clicked where no sprite is (Stage) |
+| `on_message("name") { }` | a message is broadcast |
+| `on_clone { }` | a new clone starts |
+| `on_backdrop("name") { }` | the backdrop (room) switches to this name |
+| `on_timer(10) { }` | the timer passes 10 seconds |
+| `every(0.5) { }` | every 0.5 seconds |
+| `on_draw { }` | every frame (for `draw_*`) |
+| `on_widget_click("btn") { }` / `on_widget_change("box") { }` | a widget is used |
+| `define name(a, b) { }` | defines your own block (see §8) |
+| `script { }` | a loose stack with no hat (runs when you click it) |
+
+Each file (`.kls`) holds the scripts of **one** sprite. Scripts can be in any order.
+
+## 2. Lexical rules
+
+- **Comments** start with `//` and go to the end of the line.
+- **Whitespace** (spaces, tabs, new lines) only separates things. You may put two statements on one line: `move(10) bounce`.
+- **Names** (identifiers): letters, digits and `_`, not starting with a digit: `turn_right`, `score2`.
+- **Numbers**: `10`, `3.5`, `.5`, `1e3`. A minus in front is an operator: `-5`.
+- **Text** (strings): double quotes only: `"hello"`. Escapes: `\n` is a new line, `\"` is a quote, `\\` is a backslash. Any other `\x` just gives `x` (so `\t` is a plain `t`).
+- **Variables**: `@score`, or with spaces `@"high score"`. **Lists**: `@@items`, `@@"my items"`.
+- **Reserved words**: `define`, `script`, `else`, `and`, `or`, `not`, `eval`, `param`, `true`, `false`, plus every built-in name.
+- The names `__proto__`, `constructor` and `prototype` can't be used for variables, lists, blocks or inputs.
+
+## 3. Statements
+
+A statement is a block name, then its arguments in `( )`. Blocks with no arguments can drop the brackets:
+
+```kindlr
+on_ignite {
+  move(10)
+  say_for("Hi", 2)
+  next_costume
+  pen_down()
+}
+```
+
+Giving too many arguments is an error. Missing arguments get the block's default value (for example `move()` moves 10).
+
+## 4. Values and types
+
+Kindlr has four kinds of value:
+
+| Type | Examples | Notes |
+|---|---|---|
+| number | `10`, `-3.5`, `1e3` | shown with at most 10 decimals: `0.1 + 0.2` shows `0.3` |
+| text | `"hello"` | up to 100 000 characters |
+| boolean | `true`, `false` | |
+| map | made with `new_map` / `from_json` | text keys → plain values (see §7) |
+
+Lists are not values. They live in list variables (`@@name`).
+
+Kindlr is **forgiving** about types:
+
+- In maths, text that is not a number counts as `0`.
+- Numbers become text when needed: `join("Score: ", 5)`.
+- **False** means: `false`, `0`, empty text `""`, `"0"` or `"false"` (any case). Everything else is true (even `"0.0"`).
+- `type_of(v)` tells you `"number"`, `"text"`, `"boolean"` or `"map"`. Text that looks like a number, like `"42"`, counts as a number.
+
+## 5. Operators and precedence
+
+From lowest to highest:
+
+| Level | Operators | Meaning |
+|---|---|---|
+| 1 | `or` | at least one is true |
+| 2 | `and` | both are true |
+| 3 | `not` | the opposite |
+| 4 | `<` `>` `=` `==` `!=` `<=` `>=` | compare |
+| 5 | `+` `-` | add, subtract |
+| 6 | `*` `/` `%` | multiply, divide, remainder |
+| 7 | `-` (in front) | negative |
+
+- Use `( )` to change the order: `(2 + 3) * 4` is 20.
+- `=` and `==` are the same. `!=`, `<=`, `>=` are turned into `not` + `=`, `>` or `<` blocks.
+- **Comparing:** if both sides look like numbers they compare as numbers (`"10" > "9"` is true). Otherwise they compare as text, alphabetically, **ignoring upper/lower case** (`"Apple" = "apple"` is true).
+- `/` by 0 gives `Infinity`. `%` follows the sign of the right side: `-1 % 3` is `2`.
+- Text functions like `join`, `contains`, `letter_of` are normal calls, not operators.
+
+## 6. Variables and scope
+
+```kindlr
+on_ignite {
+  set(@score, 0)
+  change(@score, 1)
+  say(@score)
+}
+```
+
+There are three places a value can live:
+
+| Kind | How you make it | Who sees it |
+|---|---|---|
+| **Global** variable | **+ Make a Variable** → "For all sprites", or just use it in Kindlr Script | every sprite and the Stage (stored on the Stage) |
+| **Sprite** variable | **+ Make a Variable** → "For this sprite only" | only that sprite. Each **clone gets its own copy**, taken when the clone is made |
+| **Block input** | `define jump(height) { … }` | only inside that `define`, read-only |
+
+Rules:
+
+- When a sprite uses `@name`, Kindlr first looks for the sprite's own variable, then for a global one.
+- If neither exists, a global variable is created (starting at `0`, or an empty list). **Apply to blocks** also creates missing variables as globals.
+- There are **no local variables** inside scripts. Use block inputs, or a sprite variable.
+- Lists work the same way with `@@name`.
+
+## 7. Lists and maps
+
+```kindlr
+on_ignite {
+  list_clear(@@basket)
+  list_add("apple", @@basket)
+  list_add("pear", @@basket)
+  say(list_item(1, @@basket))
+  new_map(@player)
+  map_set(@player, "name", "Mika")
+  map_set(@player, "hp", 3)
+  print(to_json(@player))
+}
+```
+
+- List positions start at **1**. `"last"` works for most list blocks; `list_item` also takes `"random"`.
+- `@@basket` used as a value gives the whole list as text (items joined by spaces).
+- A map is stored in a normal variable. Map values are plain (no nested maps). `from_json` keeps nested objects as JSON text.
+
+## 8. Control flow
+
+```kindlr
+on_ignite {
+  repeat(3) {
+    move(10)
+  }
+  if x_pos > 100 {
+    say("right")
+  } else if x_pos < -100 {
+    say("left")
+  } else {
+    say("middle")
+  }
+  repeat_until(touching("_edge_")) {
+    move(5)
+  }
+  while(key_pressed("space")) {
+    change_size(1)
+  }
+  for_each(@i, 5) {
+    print(@i)
+  }
+  wait_until(mouse_down)
+  forever {
+    turn_right(2)
+  }
+}
+```
+
+- Conditions may have brackets or not: `if (x_pos > 1) { }` and `if x_pos > 1 { }` are the same.
+- `for_each(@i, n)` sets `@i` to 1, 2, … n.
+- `stop("all")`, `stop("this script")`, `stop("other scripts in sprite")`.
+- **Speed:** a loop that changes something on screen runs **one round per frame** (about 60 per second), so animations are smooth. A loop that changes nothing visible runs many rounds per frame.
+
+## 9. Custom blocks (functions)
+
+```kindlr
+define square(size) {
+  repeat(4) {
+    move(size)
+    turn_right(90)
+  }
+}
+
+on_ignite {
+  pen_down
+  square(50)
+  square(100)
+}
+```
+
+- Inputs are **bare names** inside the body (`size`), or `param("size")`.
+- `define!` (with `!`) runs the whole block without redrawing the screen in between. Use it for drawing and maths: it is much faster.
+- Custom blocks are **commands**: they don't return a value. To give back a result, set a variable: `set(@result, …)`.
+- A custom block belongs to the sprite it is defined in.
+- Blocks can call themselves (recursion), up to 400 levels deep.
+
+> **Watch out:** a bare unknown name like `scroe` is read as a block input. Outside a `define` it is just empty text, so a typo here does not give an error. Write variables with `@`.
+
+## 10. Events, messages, clones and rooms
+
+```kindlr
+on_ignite {
+  broadcast("start")
+  hide
+  repeat(5) {
+    clone("_myself_")
+  }
+}
+
+on_clone {
+  go_to("_random_")
+  show
+  wait(2)
+  delete_clone
+}
+
+on_message("start") {
+  say_for("Go!", 1)
+}
+```
+
+- `broadcast("name")` starts every `on_message("name")` script in all sprites. Names ignore case. A receiver that is still running starts again from the top.
+- `broadcast_wait` waits until all receivers are done.
+- `on_key` scripts don't restart while still running; other hats do.
+- **Clones** share the scripts and costumes of the original. At most **300** clones. All clones disappear on Stop and Ignite. `delete_clone` does nothing in the original.
+- **Rooms** are backdrops: `go_room("level 2")`, `room_name`, `on_backdrop("level 2") { }`.
+- `on_timer(n)` fires once when the timer passes n; `reset_timer` arms it again.
+- `every(s)` repeats every s seconds (minimum 0.02).
+
+## 11. Console, widgets and storage (program mode)
+
+You can build apps, not only games:
+
+```kindlr
+on_ignite {
+  clear_console
+  ui_clear
+  ui_textbox("name", -100, 60)
+  ui_button("hello", "Say hello", -100, 0)
+}
+
+on_widget_click("hello") {
+  print(join("Hello, ", ui_value("name")))
+  store_set("last_name", ui_value("name"))
+}
+```
+
+- `print` writes to the console under the stage (last 500 lines are kept).
+- Widgets: button, label, text box, slider. The x, y point is the widget's **top-left** corner, in stage coordinates. At most 100 widgets. Widgets are removed on Stop and Ignite.
+- `ask("question")` waits for typed input; `answer` holds it.
+- `store_set(key, value)` / `store_get(key)` keep values **inside the project file**, so they are still there next time (max 500 keys). In a shared project played by someone else, saving only lasts for that visit.
+
+## 12. Drawing, physics and camera (game toolkit)
+
+```kindlr
+on_ignite {
+  set_gravity(0.5)
+  physics("on")
+}
+
+on_key("space") {
+  change_velocity(0, 10)
+}
+
+on_draw {
+  draw_rect(-240, -180, 480, 20, "#5BAF4E")
+  draw_text(join("vy ", round(velocity_y)), -230, 160, "#1d2333")
+}
+```
+
+- **Pen** (`pen_down`, `stamp`…) draws lines that stay until `pen_clear`.
+- **Shapes** (`draw_rect`, `draw_circle`, `draw_line`, `draw_text`) last one frame. Draw them in `on_draw`. At most 5000 shapes per frame.
+- **Physics** per sprite: every frame velocity y drops by gravity, both velocities shrink by friction, then the sprite moves. There are no automatic collisions; check them with `touching` or positions.
+- **Camera** (`camera`, `change_camera`, `camera_follow`) shifts sprites, pen, shapes and bubbles; not the backdrop or widgets. Note that sprites are still kept near the 480 × 360 stage area.
+- Coordinates: centre (0, 0), x from -240 to 240, y from -180 (bottom) to 180 (top). Directions: 0 up, 90 right, 180 down, -90 left.
+
+## 13. Showing one value: `eval`
+
+A script can be a single reporter, useful to test an expression by clicking it:
+
+```kindlr
+script {
+  eval(round(10 / 3))
+}
+```
+
+`eval` only wraps a reporter block. It never runs text as code.
+
+## 14. Grammar (EBNF)
+
+```text
+program     = { script } ;
+script      = hat_call body
+            | "define" [ "!" ] NAME "(" [ NAME { "," NAME } ] ")" body
+            | "script" body ;
+hat_call    = HAT_NAME [ "(" [ expr { "," expr } ] ")" ] ;
+body        = "{" { statement } "}" ;
+statement   = "eval" "(" expr ")"                      (* only alone in script { } *)
+            | "if" condition body [ "else" ( body | statement_if ) ]
+            | C_NAME ( "(" args ")" | args ) body      (* repeat, forever, while, repeat_until, for_each *)
+            | CUSTOM_NAME [ "(" args ")" ]
+            | CMD_NAME [ "(" args ")" ] ;
+condition   = "(" expr ")" | expr ;
+args        = [ expr { "," expr } ] ;
+expr        = or_expr ;
+or_expr     = and_expr { "or" and_expr } ;
+and_expr    = not_expr { "and" not_expr } ;
+not_expr    = "not" not_expr | cmp_expr ;
+cmp_expr    = add_expr { ( "<" | ">" | "=" | "==" | "!=" | "<=" | ">=" ) add_expr } ;
+add_expr    = mul_expr { ( "+" | "-" ) mul_expr } ;
+mul_expr    = unary { ( "*" | "/" | "%" ) unary } ;
+unary       = "-" unary | primary ;
+primary     = NUMBER | STRING | "true" | "false"
+            | "@" ( NAME | STRING ) | "@@" ( NAME | STRING )
+            | "param" "(" expr ")"
+            | REPORTER_NAME [ "(" args ")" ]
+            | NAME                                     (* a custom-block input *)
+            | "(" expr ")" ;
+NAME        = letter_or_underscore { letter | digit | "_" } ;
+NUMBER      = digits [ "." digits ] [ ("e"|"E") ["+"|"-"] digits ] | "." digits ;
+STRING      = '"' { char | "\" any_char } '"' ;
+COMMENT     = "//" { any_char_except_newline } ;
+```
+
+`HAT_NAME`, `CMD_NAME`, `C_NAME` and `REPORTER_NAME` are the built-in names in [Built-in functions]. `CUSTOM_NAME` is any name defined with `define` in the same text.
+
+## 15. Error messages
+
+**Parse errors** appear under the editor when you click **Apply to blocks**:
+
+| Message | What it means |
+|---|---|
+| `Line 2: unknown block 'mvoe'` | A typo in a command name, or a custom block that isn't defined. |
+| `Line 3: unknown reporter 'x_poss'` | A typo in a reporter name that has `( )`. |
+| `'move' takes 1 argument(s) but got 2` | Too many arguments. |
+| `expected ) but found }` | A bracket is missing. |
+| `missing }` | A `{` was never closed. |
+| `unterminated string` | A `"` was never closed. |
+| `unexpected character '#'` | A character Kindlr doesn't use (outside a string). |
+| `expected a name after @` | `@` must be followed by a name or `"…"`. |
+| `'move' cannot start a script — use a hat like on_ignite { }…` | Statements must be inside a hat. |
+| `expected a script (e.g. on_ignite { ... }) but found }` | An extra `}`. |
+| `expected id but found 1` | A line starts with a value, not a block name. |
+| `argument 1 of 'set' must be a plain value` | Menu/variable slots can't hold calculations. |
+| `a reporter (eval) can only stand alone in its own script { }` | A reporter was used as a statement. |
+| `eval() needs a reporter block` | `eval()` is empty or holds a plain value. |
+| `nesting deeper than 64` / `More than 20000 blocks` | The program is too big (see Limits). |
+| `“__proto__” is a reserved name…` | Pick another name. |
+
+**Runtime errors** stop only the script that failed and show a message:
+
+| Message | What it means |
+|---|---|
+| `Runtime error: Invalid JSON` | `from_json` got text that is not JSON. |
+| `Runtime error: Custom block recursion deeper than 400` | A custom block called itself too many times. |
+| `Too many scripts running` | More than 2000 scripts at once. |
+| `Watchdog: project stopped (a script ran too long without pausing)` | One step took over 1 second. |
+
+## 16. Limits
+
+| Limit | Value |
+|---|---|
+| Script text | 1 MB |
+| Project file | 5 MB |
+| Nesting depth | 64 |
+| Blocks per project | 20 000 |
+| Sprites | 100 |
+| Variables + lists per sprite | 1000 |
+| List length | 200 000 items |
+| Text length | 100 000 characters |
+| Map size | 10 000 keys |
+| Clones | 300 |
+| Scripts running at once | 2000 |
+| Recursion depth | 400 |
+| Block steps per frame | 100 000 (then the frame ends) |
+| `define!` burst | 500 ms, then it pauses one frame |
+| Watchdog | a single step over 1 s stops the project |
+| Project storage | 500 keys |
+
+**Speed tips:** use `define!` for heavy loops; draw in `on_draw` rather than with many clones; avoid `touching_color` in tight loops (it reads pixels).
+
+
+# All built-ins (command = stack/cap/c, reporter/boolean = value, hat = event)
+
+- `on_ignite` { … } [hat; op ev_ignite] Starts this script when someone presses the 🔥 Ignite button. Ignite first stops everything, resets the timer, camera, physics and effects, then starts every `on_ignite` script in every sprite and the Stage.
+- `on_key("key")` { … } [hat; op ev_key] Runs when a key is pressed. `"any"` matches every key. If the script is still running from the last press, holding the key does not restart it.
+- `on_click` { … } [hat, sprite only; op ev_click] Runs when the user clicks this sprite on the stage (the top-most sprite under the pointer wins). Clicking again restarts the script.
+- `on_stage_click` { … } [hat, Stage only; op ev_stageclick] Runs on the Stage when the user clicks a part of the stage where no sprite is.
+- `on_backdrop("backdrop")` { … } [hat; op ev_backdrop] Runs when the Stage switches to the backdrop with exactly this name (case-sensitive). Also fires for `go_room`.
+- `on_timer(number)` { … } [hat; op ev_timer] Runs once when the project timer goes above the number. `reset_timer` arms it again. Clones do not get this event.
+- `on_message("message")` { … } [hat; op ev_receive] Runs when this message is broadcast. Message names are matched without caring about upper/lower case. A new broadcast restarts a receiver that is still running.
+- `broadcast("message")` [stack; op ev_broadcast] Sends a message to every sprite and the Stage. Scripts that start with `on_message` with the same name start running. The sender does not wait.
+- `broadcast_wait("message")` [stack; op ev_broadcastwait] Like `broadcast`, but waits until every script that received the message has finished.
+- `move(number)` [stack, sprite only; op mo_move] Moves the sprite forward in the direction it is pointing. Negative numbers move backwards.
+- `turn_right(number)` [stack, sprite only; op mo_turnr] Turns the sprite clockwise by the given degrees.
+- `turn_left(number)` [stack, sprite only; op mo_turnl] Turns the sprite counter-clockwise by the given degrees.
+- `go_to("goto")` [stack, sprite only; op mo_goto] Jumps to a random spot (`"_random_"`), the mouse pointer (`"_mouse_"`) or another sprite (its name).
+- `go_xy(number, number)` [stack, sprite only; op mo_gotoxy] Jumps to a point. The stage centre is (0, 0); x goes from -240 (left) to 240 (right), y from -180 (bottom) to 180 (top).
+- `glide_to(number, "goto")` [stack, sprite only; op mo_glideto] Slides smoothly to a random spot, the mouse or a sprite over the given seconds. The script waits until the glide is done.
+- `glide_xy(number, number, number)` [stack, sprite only; op mo_glide] Slides smoothly to a point over the given seconds. The script waits until the glide is done.
+- `point(number)` [stack, sprite only; op mo_point] Points the sprite in a direction: 90 = right, -90 = left, 0 = up, 180 = down. Directions are kept between -179 and 180.
+- `point_towards("towards")` [stack, sprite only; op mo_towards] Turns the sprite to face the mouse pointer (`"_mouse_"`) or another sprite.
+- `change_x(number)` [stack, sprite only; op mo_chx] Moves the sprite left or right by the number.
+- `set_x(number)` [stack, sprite only; op mo_setx] Sets the x position (left/right).
+- `change_y(number)` [stack, sprite only; op mo_chy] Moves the sprite up or down by the number.
+- `set_y(number)` [stack, sprite only; op mo_sety] Sets the y position (up/down).
+- `bounce` [stack, sprite only; op mo_bounce] If the sprite touches the stage edge, it turns around so it moves away from the edge, and is pushed back inside.
+- `rotation_style("rotStyle")` [stack, sprite only; op mo_rotstyle] How the costume turns with the direction: `"all around"` (rotates), `"left-right"` (only flips), `"don't rotate"`.
+- `x_pos` [reporter, sprite only; op mo_x] The sprite's x position.
+- `y_pos` [reporter, sprite only; op mo_y] The sprite's y position.
+- `direction` [reporter, sprite only; op mo_dir] The direction the sprite points (-179…180).
+- `say_for(text, number)` [stack, sprite only; op lo_sayfor] Shows a speech bubble for some seconds, then removes it. The script waits.
+- `say(text)` [stack, sprite only; op lo_say] Shows a speech bubble until something else replaces it. `say("")` removes the bubble.
+- `think_for(text, number)` [stack, sprite only; op lo_thinkfor] Shows a thought bubble for some seconds. The script waits.
+- `think(text)` [stack, sprite only; op lo_think] Shows a thought bubble until something replaces it.
+- `costume("costume")` [stack, sprite only; op lo_costume] Switches to a costume by name or by number (1 = first). `"next costume"` and `"previous costume"` also work.
+- `next_costume` [stack, sprite only; op lo_nextcostume] Switches to the next costume, going back to the first after the last one.
+- `backdrop("backdrop")` [stack; op lo_backdrop] Switches the Stage backdrop by name or number. Also accepts `"next backdrop"`, `"previous backdrop"` and `"random backdrop"`. Starts matching `on_backdrop` scripts.
+- `next_backdrop` [stack; op lo_nextbackdrop] Switches to the next backdrop.
+- `change_size(number)` [stack, sprite only; op lo_chsize] Changes the size by the number (percent points). Size stays between 5 % and 500 %.
+- `set_size(number)` [stack, sprite only; op lo_setsize] Sets the size in percent (100 = normal). Size stays between 5 % and 500 %.
+- `change_effect("effect", number)` [stack; op lo_cheffect] Changes a graphic effect: `"color"` (hue shift, 200 = full circle), `"ghost"` (0 = solid, 100 = invisible), `"brightness"`, `"saturation"` (-100…).
+- `set_effect("effect", number)` [stack; op lo_seteffect] Sets a graphic effect to a value. See `change_effect` for the effects.
+- `clear_effects` [stack; op lo_cleareffects] Removes all graphic effects.
+- `show` [stack, sprite only; op lo_show] Makes the sprite visible.
+- `hide` [stack, sprite only; op lo_hide] Hides the sprite. Hidden sprites are never "touching" anything.
+- `layer("frontBack")` [stack, sprite only; op lo_front] Moves the sprite in front of (`"front"`) or behind (`"back"`) all other sprites.
+- `move_layers("fwdBack", number)` [stack, sprite only; op lo_layers] Moves the sprite forward or backward by some layers.
+- `costume_of("numName")` [reporter, sprite only; op lo_costumeof] The current costume's number (`"number"`) or name (`"name"`).
+- `backdrop_of("numName")` [reporter; op lo_backdropof] The current backdrop's number or name.
+- `size` [reporter, sprite only; op lo_size] The sprite's size in percent, rounded.
+- `play_sound_wait("sound")` [stack; op so_playwait] Plays a built-in sound and waits until it ends. Sounds: pop, beep, coin, laser, boom, chirp, jump, win.
+- `play_sound("sound")` [stack; op so_play] Starts a built-in sound and continues right away.
+- `note(number, number)` [stack; op so_note] Plays a note (MIDI number, 60 = middle C) for some beats at the current tempo, with the current instrument. Waits until the note ends.
+- `tone(number, number)` [stack; op so_tone] Plays a tone at a frequency in Hertz for some seconds. Waits until it ends.
+- `instrument("wave")` [stack; op so_inst] Sets the waveform used by `note` and `tone` for this sprite: sine, square, sawtooth, triangle.
+- `stop_sounds` [stack; op so_stop] Stops all sounds that are playing.
+- `change_volume(number)` [stack; op so_chvol] Changes this sprite's volume (0–100).
+- `set_volume(number)` [stack; op so_setvol] Sets this sprite's volume in percent (0–100).
+- `set_tempo(number)` [stack; op so_tempo] Sets the tempo for `note`, in beats per minute (20–500). The tempo is shared by the whole project.
+- `volume` [reporter; op so_vol] This sprite's volume (0–100).
+- `wait(number)` [stack; op ct_wait] Pauses this script for some seconds. Other scripts keep running.
+- `repeat(number)` { … } [c; op ct_repeat] Runs the blocks inside a number of times (the number is rounded).
+- `forever` { … } [c; op ct_forever] Runs the blocks inside again and again until the project stops. Nothing can come after it.
+- `if(condition)` { … } [c; op ct_if] Runs the blocks inside only if the condition is true.
+- `if(condition)` { … } [cc; op ct_ifelse] Runs the first part if the condition is true, otherwise the `else` part. In Kindlr Script you can chain `else if`.
+- `wait_until(condition)` [stack; op ct_waituntil] Pauses this script until the condition becomes true.
+- `repeat_until(condition)` { … } [c; op ct_until] Repeats the blocks inside until the condition becomes true. The condition is checked before each round.
+- `while(condition)` { … } [c; op ct_while] Repeats the blocks inside as long as the condition is true.
+- `for_each(@var, number)` { … } [c; op ct_for] Counts a variable from 1 up to the number, running the blocks inside once for each value.
+- `stop("stopOpt")` [stack; op ct_stop] `"all"` stops the whole project, `"this script"` ends this script, `"other scripts in sprite"` stops the sprite's other scripts and keeps going.
+- `on_clone` { … } [hat, sprite only; op ct_cloned] Runs in a new clone right after it is created. Clones share the original's scripts and costumes.
+- `clone("cloneOf")` [stack; op ct_clone] Creates a copy (clone) of this sprite (`"_myself_"`) or of another sprite. At most 300 clones can exist at once; extra requests are ignored.
+- `delete_clone` [cap, sprite only; op ct_delclone] Removes this clone and stops its scripts. Does nothing in the original sprite.
+- `touching("touch")` [boolean, sprite only; op se_touching] True if this sprite touches the mouse pointer (`"_mouse_"`), the edge (`"_edge_"`) or another sprite (by name; its clones count too). Hidden sprites never touch anything.
+- `touching_color(colour)` [boolean, sprite only; op se_touchcolor] True if this sprite overlaps something with this colour (give it as `"#RRGGBB"`).
+- `distance_to("towards")` [reporter, sprite only; op se_distance] Distance in steps to the mouse pointer or a sprite. Returns 10000 if the sprite does not exist.
+- `ask(text)` [stack; op se_ask] Asks a question and waits until the user types an answer and presses Enter. A visible sprite shows the question in a speech bubble; otherwise it is shown in the input box. Only one question is open at a time.
+- `answer` [reporter; op se_answer] The text typed for the most recent `ask`. It is shared by the whole project.
+- `key_pressed("key")` [boolean; op se_key] True while the key is held down. `"any"` is true if any key is down.
+- `mouse_down` [boolean; op se_mousedown] True while the mouse button is pressed.
+- `mouse_x` [reporter; op se_mousex] The mouse pointer's x position on the stage (rounded).
+- `mouse_y` [reporter; op se_mousey] The mouse pointer's y position on the stage (rounded).
+- `timer` [reporter; op se_timer] Seconds since Ignite or the last `reset_timer`, with two decimals.
+- `reset_timer` [stack; op se_resettimer] Sets the timer back to 0.
+- `prop_of("prop", "object")` [reporter; op se_of] Reads a property of another sprite or the Stage (`"_stage_"`): x position, y position, direction, costume #, costume name, size, volume (sprites); backdrop #, backdrop name, volume (Stage). Any other name reads that target's own variable. Returns 0 if the sprite does not exist.
+- `current("current")` [reporter; op se_current] Part of the current local date/time: year, month, date, day of week (1 = Sunday), hour, minute, second.
+- `days_since_2000` [reporter; op se_days] Days (with fractions) since 1 January 2000 (UTC).
+- `a + b` [reporter; op op_add] Adds two numbers. Text that is not a number counts as 0.
+- `a - b` [reporter; op op_sub] Subtracts the second number from the first.
+- `a * b` [reporter; op op_mul] Multiplies two numbers.
+- `a / b` [reporter; op op_div] Divides the first number by the second. Dividing by 0 gives `Infinity`.
+- `random(number, number)` [reporter; op op_random] A random number between the two values (both included). If both are whole numbers without a decimal point you get a whole number; otherwise a decimal number.
+- `a > b` [boolean; op op_gt] True if the first value is greater. Numbers compare as numbers; other text compares alphabetically, ignoring upper/lower case.
+- `a < b` [boolean; op op_lt] True if the first value is smaller.
+- `a = b` [boolean; op op_eq] True if the values are equal. `"Apple" = "apple"` is true, and `"10" = 10.0` is true.
+- `a and b` [boolean; op op_and] True only if both conditions are true.
+- `a or b` [boolean; op op_or] True if at least one condition is true.
+- `not(condition)` [boolean; op op_not] True if the condition is false, and false if it is true.
+- `join(text, text)` [reporter; op op_join] Joins two pieces of text together.
+- `letter_of(number, text)` [reporter; op op_letter] The letter at a position (1 = first). Empty text if the position is outside the text.
+- `length_of(text)` [reporter; op op_length] How many characters the text has.
+- `contains(text, text)` [boolean; op op_contains] True if the first text contains the second (upper/lower case ignored).
+- `a % b` [reporter; op op_mod] The remainder after division. The result has the same sign as the second number: `7 % 3` is 1, `-1 % 3` is 2.
+- `round(number)` [reporter; op op_round] Rounds to the nearest whole number (.5 rounds up: 2.5 → 3, -2.5 → -2).
+- `math("mathfn", number)` [reporter; op op_math] A maths function: abs, floor, ceiling, sqrt, sin, cos, tan, asin, acos, atan (angles in degrees), ln (natural log), log (base 10), e ^, 10 ^. Results are rounded to 10 decimals. Impossible results (e.g. `sqrt` of -1) give `NaN`.
+- `set(@var, text)` [stack; op va_set] Sets a variable to a value (number, text, true/false or a map).
+- `change(@var, number)` [stack; op va_change] Adds a number to a variable (use a negative number to subtract).
+- `show_var(@var)` [stack; op va_show] Shows the variable's monitor box on the stage.
+- `hide_var(@var)` [stack; op va_hide] Hides the variable's monitor box.
+- `list_add(text, @@list)` [stack; op li_add] Adds an item to the end of a list. A list holds at most 200 000 items; more are ignored.
+- `list_delete(number, @@list)` [stack; op li_delete] Deletes the item at a position. Also accepts `"last"` and `"all"`.
+- `list_clear(@@list)` [stack; op li_clear] Deletes every item from the list.
+- `list_insert(text, number, @@list)` [stack; op li_insert] Inserts an item at a position (1 = front). `"last"` adds to the end.
+- `list_replace(number, @@list, text)` [stack; op li_replace] Replaces the item at a position (or `"last"`).
+- `list_item(number, @@list)` [reporter; op li_item] The item at a position. `"last"` and `"random"` work too. Empty text if there is no such item.
+- `list_index(text, @@list)` [reporter; op li_index] The position of the first matching item (upper/lower case ignored), or 0 if it is not in the list.
+- `list_length(@@list)` [reporter; op li_length] How many items the list has.
+- `list_contains(@@list, text)` [boolean; op li_contains] True if the list has the item (upper/lower case ignored).
+- `show_list(@@list)` [stack; op li_show] Shows the list's monitor on the stage.
+- `hide_list(@@list)` [stack; op li_hide] Hides the list's monitor.
+- `pen_clear` [stack; op pe_clear] Erases everything drawn with the pen and with `stamp`.
+- `stamp` [stack, sprite only; op pe_stamp] Prints a picture of the sprite onto the pen layer.
+- `pen_down` [stack, sprite only; op pe_down] Puts the pen down: from now on the sprite draws a line when it moves.
+- `pen_up` [stack, sprite only; op pe_up] Lifts the pen so moving no longer draws.
+- `pen_color(colour)` [stack, sprite only; op pe_color] Sets the pen colour, e.g. `"#FF5D73"`.
+- `pen_hue(number)` [stack, sprite only; op pe_chhue] Shifts the pen colour around the colour wheel (200 = a full circle).
+- `pen_size(number)` [stack, sprite only; op pe_size] Sets the pen thickness (1–200).
+- `change_pen_size(number)` [stack, sprite only; op pe_chsize] Changes the pen thickness (stays within 1–200).
+- `print(text)` [stack; op pr_print] Writes a line of text to the console under the stage. The console keeps the last 500 lines; each line shows at most 2000 characters.
+- `clear_console` [stack; op pr_clear] Empties the console.
+- `ui_button(text, text, number, number)` [stack; op ui_button] Adds a button widget with a name and a label at a stage position (the point is the widget's top-left corner). Using a name again replaces that widget. At most 100 widgets.
+- `ui_label(text, text, number, number)` [stack; op ui_label] Adds a text label widget.
+- `ui_textbox(text, number, number)` [stack; op ui_textbox] Adds a one-line text box (max 1000 characters). Read it with `ui_value`.
+- `ui_slider(text, number, number, number, number)` [stack; op ui_slider] Adds a slider between two numbers. It starts at the lower number.
+- `ui_set_text(text, text)` [stack; op ui_settext] Changes the text of a widget. For labels and text boxes this also changes their value.
+- `ui_remove(text)` [stack; op ui_remove] Removes one widget by name.
+- `ui_clear` [stack; op ui_clear] Removes all widgets.
+- `ui_value(text)` [reporter; op ui_value] The value of a widget: the typed text of a text box, the number of a slider, the text of a label. A button's value is empty. Empty text if there is no such widget.
+- `on_widget_click(text)` { … } [hat; op ui_clicked] Runs when the button with this name is clicked.
+- `on_widget_change(text)` { … } [hat; op ui_changed] Runs when a text box or slider with this name is changed. A text box reports a change when you press Enter or leave the box; a slider when you let go.
+- `store_set(text, text)` [stack; op st_set] Saves a value under a key in the project's own storage. It is saved with the project, so it is still there next time. Up to 500 keys; keys are cut to 120 characters.
+- `store_get(text)` [reporter; op st_get] Reads a value from project storage. Empty text if the key does not exist.
+- `true` [boolean; op dt_true] The value true.
+- `false` [boolean; op dt_false] The value false.
+- `type_of(text)` [reporter; op dt_typeof] The kind of a value: `"number"`, `"text"`, `"boolean"` or `"map"`. Text that looks like a number (like `"42"`) counts as a number.
+- `upper(text)` [reporter; op dt_upper] The text in UPPER CASE.
+- `lower(text)` [reporter; op dt_lower] The text in lower case.
+- `trim(text)` [reporter; op dt_trim] The text without spaces at the start and end.
+- `replace(text, text, text)` [reporter; op dt_replace] Replaces every copy of the first text with the second, inside the third. Upper/lower case matters here.
+- `substring(number, number, text)` [reporter; op dt_sub] The letters from one position to another (both included, 1 = first).
+- `index_of(text, text)` [reporter; op dt_index] Where the first text appears inside the second (1 = start), or 0 if not found. Upper/lower case ignored.
+- `split(text, text, @@list)` [stack; op dt_split] Splits text at every separator and puts the pieces into a list (replacing what was in it). An empty separator splits into single characters.
+- `join_list(@@list, text)` [reporter; op dt_joinlist] All items of a list joined into one text with a separator between them.
+- `new_map(@var)` [stack; op dt_newmap] Makes the variable an empty map. A map stores values under text keys (like a small dictionary).
+- `map_set(@var, text, text)` [stack; op dt_mapset] Stores a value under a key in a map. If the variable is not a map yet, it becomes an empty map first. Up to 10 000 keys.
+- `map_get(text, @var)` [reporter; op dt_mapget] The value stored under a key, or empty text if the key is missing.
+- `map_has(@var, text)` [boolean; op dt_maphas] True if the map has the key.
+- `map_delete(text, @var)` [stack; op dt_mapdel] Removes a key from a map.
+- `map_keys(@var, @@list)` [stack; op dt_mapkeys] Puts all keys of a map into a list (replacing what was in it).
+- `map_size(@var)` [reporter; op dt_mapsize] How many keys the map has.
+- `to_json(@var)` [reporter; op dt_tojson] The variable's value as JSON text (handy for maps).
+- `from_json(@var, text)` [stack; op dt_fromjson] Reads JSON text into a variable. A JSON object becomes a map; nested objects and arrays inside it are kept as JSON text. A JSON array becomes a map with keys "0", "1", … Invalid JSON stops the script with the error "Invalid JSON".
+- `every(number)` { … } [hat; op ev_every] Runs again and again, every so many seconds (at least 0.02 s), while the project runs. If the previous run is still going, that tick is skipped. Clones do not get this event.
+- `on_draw` { … } [hat; op ga_draw] Runs once every frame (about 60 times a second). Shapes drawn with `draw_*` are cleared at the start of each frame, so draw them here. This script runs at full speed (no screen refresh in between), like a `define!` block.
+- `draw_rect(number, number, number, number, colour)` [stack; op ga_rect] Draws a filled rectangle for this frame. x and y are the bottom-left corner.
+- `draw_circle(number, number, number, colour)` [stack; op ga_circle] Draws a filled circle for this frame. x and y are the centre.
+- `draw_line(number, number, number, number, colour)` [stack; op ga_line] Draws a line (2 px wide) from one point to another for this frame.
+- `draw_text(text, number, number, colour)` [stack; op ga_text] Draws text for this frame. x and y are the left end of the text's baseline. At most 500 characters.
+- `physics("onoff")` [stack, sprite only; op ga_physics] Turns simple physics on or off for this sprite. When on, each frame: velocity y goes down by gravity, both velocities shrink by friction, and the sprite moves by its velocity. There is no automatic collision.
+- `set_velocity(number, number)` [stack, sprite only; op ga_setvel] Sets the sprite's velocity (steps per frame).
+- `change_velocity(number, number)` [stack, sprite only; op ga_chvel] Adds to the sprite's velocity. Great for jumps.
+- `set_speed(number)` [stack, sprite only; op ga_speed] Sets the velocity to a speed in the direction the sprite points.
+- `set_gravity(number)` [stack, sprite only; op ga_gravity] Sets this sprite's gravity: how much velocity y drops every frame.
+- `set_friction(number)` [stack, sprite only; op ga_friction] Sets friction from 0 (none) to 1 (stops at once). Each frame both velocities are multiplied by (1 - friction).
+- `velocity_x` [reporter, sprite only; op ga_vx] The sprite's velocity x.
+- `velocity_y` [reporter, sprite only; op ga_vy] The sprite's velocity y.
+- `camera(number, number)` [stack; op ga_camera] Moves the camera. The camera shifts what you see: sprites, pen drawings, shapes and bubbles (not the backdrop or widgets).
+- `change_camera(number, number)` [stack; op ga_chcamera] Moves the camera by an amount.
+- `camera_follow` [stack, sprite only; op ga_follow] Centres the camera on this sprite.
+- `camera_x` [reporter; op ga_camx] The camera's x position.
+- `camera_y` [reporter; op ga_camy] The camera's y position.
+- `go_room("backdrop")` [stack; op ga_room] Goes to a "room". Rooms are backdrops, so this works like `backdrop` and starts `on_backdrop` scripts.
+- `room_name` [reporter; op ga_roomname] The name of the current room (backdrop).
+
+# API guide (for scripts and AI tools)
+
+Kindlr has a small JSON API under `/api/`. Scripts use an **API token**; the browser uses a session cookie.
+
+## 1. Get an API token
+
+1. Sign in and **verify your email** (tokens need a verified account).
+2. Open **Sign in → account settings → API tokens**, type a name and click **Create token**.
+3. Copy the token (`kl_` + 43 characters). It is shown **once** and stored only as a hash. Max 20 tokens. A password reset revokes all tokens.
+
+Use it like this:
+
+```text
+Authorization: Bearer kl_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+Tokens only work on `/api/projects*`. Every other route needs the browser session (and returns `401 API tokens can only be used with /api/projects`). Old `bf_` tokens still work.
+
+In the examples, `$K` is your site (e.g. `https://kindlr.0x11a.org`) and `$TOKEN` your token.
+
+## 2. Errors
+
+Errors are JSON with an HTTP status:
+
+```text
+{"error": "Verify your email address to publish projects", "code": "unverified"}
+```
+
+| Status | Typical message |
+|---|---|
+| 400 | `Invalid JSON body`, `Missing project data`, validation messages |
+| 401 | `Please sign in`, `Invalid API token`, `Wrong username or password` |
+| 403 | `Verify your email address to …` (`code: "unverified"`), `Project limit reached (200)`, `Origin not allowed` |
+| 404 | `Not found` (also for other people's projects) |
+| 405 | `Method not allowed` |
+| 409 | `That username is taken` |
+| 413 / 415 | `Request too large` / `Expected application/json` |
+| 422 | the project failed validation, e.g. `Unknown block “foo”: this project uses a block that Kindlr doesn't have` |
+| 429 | rate limits (resend, email change) |
+
+Request bodies must be `Content-Type: application/json`. Cookie-based writes also need an allowed `Origin` header; bearer requests don't.
+
+## 3. Projects (token or session)
+
+```bash
+# list my projects
+curl -s $K/api/projects -H "Authorization: Bearer $TOKEN"
+# → {"projects":[{"id":"…","name":"…","is_public":false,"share_id":null,"description":"","notes":"","updated_at":1760000000000}]}
+
+# read one (data is the .kindlr project JSON as a string)
+curl -s $K/api/projects/PROJECT_ID -H "Authorization: Bearer $TOKEN"
+
+# create  → 201 {"id":"…"}
+curl -s -X POST $K/api/projects -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"name":"My game","data":"<project JSON as a string>","description":"","notes":""}'
+
+# replace name + data (+ optional description/notes)
+curl -s -X PUT $K/api/projects/PROJECT_ID -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"name":"My game","data":"<project JSON as a string>"}'
+
+# change only name / description / notes
+curl -s -X PATCH $K/api/projects/PROJECT_ID -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"description":"A clicker game"}'
+
+# delete
+curl -s -X DELETE $K/api/projects/PROJECT_ID -H "Authorization: Bearer $TOKEN"
+
+# publish (verified accounts; confirm must be true)  → {"id","is_public":true,"share_id","url"}
+curl -s -X POST $K/api/projects/PROJECT_ID/share -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"public":true,"confirm":true,"title":"My game","description":"…","notes":"Press Ignite"}'
+
+# unpublish (old link dies for good)
+curl -s -X DELETE $K/api/projects/PROJECT_ID/share -H "Authorization: Bearer $TOKEN"
+```
+
+Limits: 200 projects per user; project JSON ≤ 5 MB; description ≤ 1000, notes ≤ 5000 characters.
+
+## 4. Public routes (no auth)
+
+```bash
+curl -s "$K/api/explore?page=1&per=24"        # newest public projects, has_more for paging (per ≤ 48)
+curl -s $K/api/shared/SHARE_ID                 # a public project (title, author, description, notes, data)
+curl -s $K/api/embed/SHARE_ID                  # data for the embed player; ignores cookies/tokens
+curl -s $K/api/health                          # {"ok":true}
+```
+
+Public responses carry an `ETag` and answer `304` to `If-None-Match`. `POST /api/shared/SHARE_ID/remix` (signed in) copies a public project into your account.
+
+## 5. Account routes (browser session only)
+
+`POST /api/signup {username,email,password}`, `POST /api/login {username,password}`, `POST /api/logout`, `GET /api/me`, `POST /api/verify {token}`, `POST /api/verify/resend`, `POST /api/password/forgot {email}`, `POST /api/password/reset {token,password}`, `POST /api/account/password {current_password,new_password}`, `POST /api/account/email {email,password}`, `POST /api/account/delete {password,confirm:<username>}`, `GET/POST /api/tokens`, `DELETE /api/tokens/{id}`. The full schema is in `openapi.yaml` on the site.
+
+## 6. The project format
+
+`data` is a JSON string like this (the first target must be the Stage):
+
+```text
+{
+  "format": "kindlr", "version": 1, "name": "My game", "monitors": [], "storage": {},
+  "targets": [
+    { "name": "Stage", "isStage": true, "x": 0, "y": 0, "direction": 90, "size": 100, "visible": true, "costume": 0,
+      "rotationStyle": "all around", "layer": 0, "volume": 100, "tempo": 90,
+      "variables": { "score": 0 }, "lists": {}, "costumes": [ <costume> ], "scripts": [ <script> ] },
+    { "name": "Sparky", "isStage": false, ... same fields ... }
+  ]
+}
+```
+
+- A **costume** is `{ "name", "src": "data:image/svg+xml;…" or png/jpeg/gif/webp data URL, "w", "h", "cx", "cy" }`. Only embedded `data:image` URLs are allowed.
+- A **script** is `{ "x", "y", "blocks": [ … ] }`; a **block** is `{ "op": "mo_move", "args": ["10"] }`, C blocks add `"body"` (and `"body2"` for else). The `op` names are in [mapping.md].
+- The server validates everything (op allow-list, sizes, names) and answers `422` with the reason.
+
+## 7. Creating a project from Kindlr Script
+
+There is **no server endpoint that takes Kindlr Script text, and no separate validate endpoint** (TODO: confirm if one is planned). Convert the text with the open-source parser (`src/kls.js` in the Kindlr repo), then upload JSON. `parseKls` throws the same errors as the editor, so it is also your validator. Costumes are easiest to copy from an existing project (e.g. one you downloaded as `.kindlr`).
+
+```js
+// node make.mjs  (run inside a checkout of github.com/mixutin/kindlr, Node 22)
+import fs from 'node:fs';
+import { parseKls } from './src/kls.js';
+import { validateProject } from './src/limits.js';
+
+const base = JSON.parse(fs.readFileSync('template.kindlr', 'utf8'));   // a project with Stage + one sprite
+const code = fs.readFileSync('sparky.kls', 'utf8');
+base.targets[1].scripts = parseKls(code).map((s, i) => ({ x: 24, y: 24 + i * 200, ...s }));   // throws "Line N: …" on errors
+base.name = 'Made by a script';
+const data = JSON.stringify(validateProject(base));                     // same checks as the server
+
+const r = await fetch(process.env.K + '/api/projects', { method: 'POST',
+  headers: { Authorization: 'Bearer ' + process.env.TOKEN, 'Content-Type': 'application/json' },
+  body: JSON.stringify({ name: base.name, data }) });
+console.log(r.status, await r.json());
+```
+
+Variables used in the script should exist in `variables` / `lists` (the editor creates them automatically on **Apply to blocks**; the runtime also creates missing ones on the Stage when they are first used).
+

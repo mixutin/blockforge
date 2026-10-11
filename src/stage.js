@@ -6,6 +6,29 @@ export function getImg(src, onload) {
   if (!im) { im = new Image(); im.onload = () => { im._ok = true; onload && onload(); }; im.src = src; imgCache.set(src, im); }
   return im;
 }
+// Costume bitmap cache: vector (SVG) costumes are rasterized ONCE per scale bucket into an OffscreenCanvas (or a
+// canvas) and drawn from that bitmap, instead of re-rasterizing the SVG on every drawImage. Buckets are powers of two
+// (1x…8x) chosen from the on-screen scale, so sprites stay sharp when enlarged or on HiDPI screens.
+const bitmapCache = new Map();   // src -> Map(bucket -> canvas)
+let bitmapBytes = 0; const BITMAP_MAX_BYTES = 192 * 1024 * 1024;
+export function costumeBitmap(c, im, scale) {
+  if (!im._ok || !(c.w > 0 && c.h > 0)) return im;
+  const bucket = Math.min(8, Math.max(1, 2 ** Math.ceil(Math.log2(Math.max(1, scale)))));
+  let per = bitmapCache.get(c.src); if (!per) { per = new Map(); bitmapCache.set(c.src, per); }
+  let bm = per.get(bucket);
+  if (bm === undefined) {
+    const w = Math.min(4096, Math.ceil(c.w * bucket)), h = Math.min(4096, Math.ceil(c.h * bucket));
+    if (bitmapBytes + w * h * 4 > BITMAP_MAX_BYTES) { bitmapCache.clear(); bitmapBytes = 0; per = new Map(); bitmapCache.set(c.src, per); }
+    bm = typeof OffscreenCanvas === 'function' ? new OffscreenCanvas(w, h) : Object.assign(document.createElement('canvas'), { width: w, height: h });
+    const g = bm.getContext('2d');
+    if (g) { try { g.drawImage(im, 0, 0, w, h); } catch (e) { bm = null; } } else bm = null;
+    per.set(bucket, bm || im); if (bm) bitmapBytes += w * h * 4;
+    bm = bm || im;
+  }
+  return bm;
+}
+let renderScale = 2;                       // device pixels per stage unit, set by the renderer each frame
+export function setRenderScale(s) { renderScale = s > 0 ? s : 2; }
 export function costumeOf(t) { const cs = (t.base || t).costumes; return cs[Math.max(0, Math.min(cs.length - 1, t.costume | 0))]; }
 
 function applyTransform(ctx, s, c) {
@@ -25,20 +48,25 @@ function filterFor(s) {
 export function drawSprite(ctx, s, opts = {}) {
   const c = costumeOf(s); if (!c) return; const im = getImg(c.src); if (!im._ok) return;
   ctx.save(); applyTransform(ctx, s, c);
-  if (!opts.noEffects) { ctx.globalAlpha = Math.max(0, Math.min(1, 1 - (s.effects?.ghost || 0) / 100)); ctx.filter = filterFor(s); }
-  ctx.drawImage(im, -c.cx, -c.cy, c.w, c.h); ctx.restore();
+  if (!opts.noEffects) { const g = s.effects?.ghost; if (g) ctx.globalAlpha = Math.max(0, Math.min(1, 1 - g / 100)); const f = filterFor(s); if (f !== 'none') ctx.filter = f; }
+  ctx.drawImage(costumeBitmap(c, im, renderScale * (s.size || 100) / 100), -c.cx, -c.cy, c.w, c.h); ctx.restore();
 }
 // Axis-aligned bounds in canvas coords (y down)
 export function bounds(s) {
+  // allocation-free: transform the 4 costume corners with scalars (runs for every move / fence / bounce / collision)
   const c = costumeOf(s); if (!c) return { l: 0, r: 0, t: 0, b: 0 };
-  const sc = s.size / 100; let a = 0, fx = 1;
-  if (s.rotationStyle === 'all around') a = (s.direction - 90) * Math.PI / 180;
+  const sc = s.size / 100; let cos = 1, sin = 0, fx = 1;
+  if (s.rotationStyle === 'all around') { const a = (s.direction - 90) * Math.PI / 180; cos = Math.cos(a); sin = Math.sin(a); }
   else if (s.rotationStyle === 'left-right' && s.direction < 0) fx = -1;
-  const pts = [[-c.cx, -c.cy], [c.w - c.cx, -c.cy], [-c.cx, c.h - c.cy], [c.w - c.cx, c.h - c.cy]].map(([x, y]) => {
-    x *= sc * fx; y *= sc; return [x * Math.cos(a) - y * Math.sin(a) + W / 2 + s.x, x * Math.sin(a) + y * Math.cos(a) + H / 2 - s.y];
-  });
-  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
-  return { l: Math.min(...xs), r: Math.max(...xs), t: Math.min(...ys), b: Math.max(...ys) };
+  const ox = W / 2 + s.x, oy = H / 2 - s.y;
+  const x0 = -c.cx * sc * fx, x1 = (c.w - c.cx) * sc * fx, y0 = -c.cy * sc, y1 = (c.h - c.cy) * sc;
+  let l = Infinity, r = -Infinity, t = Infinity, b = -Infinity;
+  for (let i = 0; i < 4; i++) {
+    const x = i & 1 ? x1 : x0, y = i & 2 ? y1 : y0;
+    const px = x * cos - y * sin + ox, py = x * sin + y * cos + oy;
+    if (px < l) l = px; if (px > r) r = px; if (py < t) t = py; if (py > b) b = py;
+  }
+  return { l, r, t, b };
 }
 const scratch = document.createElement('canvas');
 const sctx = scratch.getContext('2d', { willReadFrequently: true });

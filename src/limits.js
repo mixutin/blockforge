@@ -1,6 +1,8 @@
+import { isKnownOp, DEFS, parseSpec } from './blocks.js';
+import { RESERVED_NAMES } from './safe.js';
 // Shared safety limits — imported by the editor, the sandboxed player, and the server.
 export const LIMITS = {
-  maxTextBytes: 1_000_000,       // Ember source text accepted by the parser
+  maxTextBytes: 1_000_000,       // Kindlr Script source text accepted by the parser
   maxJsonBytes: 5_000_000,       // serialized project JSON
   maxDepth: 64,                  // nesting depth of blocks (C-blocks + reporters)
   maxBlocks: 20_000,             // total blocks in a project
@@ -27,6 +29,40 @@ const fail = m => { throw new LimitError(m); };
 export function checkTextSize(text) { if (typeof text !== 'string') fail('Text must be a string'); if (byteLen(text) > LIMITS.maxTextBytes) fail(`Text is larger than ${LIMITS.maxTextBytes / 1e6} MB`); }
 
 /** Parse + validate a project JSON string (or object). Throws LimitError on any violation. */
+// ---- shared block-tree checks (project JSON import, API, Kindlr Script parser)
+const str = (v, what) => { if (typeof v === 'string' && v.length > LIMITS.maxStringLength) fail(`${what} is too long`); };
+const name = (v, what) => { if (typeof v !== 'string' || v.length > LIMITS.maxNameLength) fail(`Bad ${what} name`); if (RESERVED_NAMES.has(v)) fail(`“${v}” is a reserved name and can't be used as a ${what} name`); };
+const NAME_REF_OPS = new Map([['var', 'variable'], ['list', 'list'], ['param', 'parameter']]);
+// Which argument slots of each op are variable/list menus (their string values are names used as keys).
+const MENU_NAME_SLOTS = new Map();
+function nameSlots(op) {
+  if (MENU_NAME_SLOTS.has(op)) return MENU_NAME_SLOTS.get(op);
+  const out = [];
+  for (const p of parseSpec(DEFS[op]?.text || '')) if (p.t === 'arg' && (p.menu === 'var' || p.menu === 'list')) out.push([p.idx, p.menu === 'var' ? 'variable' : 'list']);
+  MENU_NAME_SLOTS.set(op, out); return out;
+}
+function visitBlockTree(b, depth, counter) {
+  if (depth > LIMITS.maxDepth) fail(`Blocks nested too deeply (max ${LIMITS.maxDepth})`);
+  if (!b || typeof b !== 'object' || Array.isArray(b) || typeof b.op !== 'string' || b.op.length > 40) fail('Malformed block');
+  if (!isKnownOp(b.op)) fail(`Unknown block “${b.op.slice(0, 40)}”: this project uses a block that Kindlr doesn't have`);
+  if (++counter.blocks > LIMITS.maxBlocks) fail(`Too many blocks (max ${LIMITS.maxBlocks})`);
+  if (b.args !== undefined && !Array.isArray(b.args)) fail('Malformed block args');
+  if ((b.args || []).length > 20) fail('Too many block inputs');
+  if (NAME_REF_OPS.has(b.op) && typeof b.args?.[0] === 'string') name(b.args[0], NAME_REF_OPS.get(b.op));
+  for (const [i, what] of nameSlots(b.op)) { const a = b.args?.[i]; if (typeof a === 'string' && a !== '') name(a, what); }
+  for (const a of b.args || []) { if (a && typeof a === 'object') visitBlockTree(a, depth + 1, counter); else if (a !== null && !['string', 'number', 'boolean'].includes(typeof a)) fail('Malformed block input'); else str(a, 'Input'); }
+  for (const k of ['body', 'body2']) if (b[k] !== undefined) { if (!Array.isArray(b[k])) fail('Malformed block body'); b[k].forEach(x => visitBlockTree(x, depth + 1, counter)); }
+  if (b.name !== undefined) name(b.name, 'block');
+  if (b.params !== undefined) { if (!Array.isArray(b.params) || b.params.length > 20) fail('Too many block parameters'); b.params.forEach(x => name(x, 'parameter')); }
+}
+/** Validate parsed scripts ([{blocks:[…]}]): op allow-list, reserved names, depth and size limits. */
+export function validateScripts(scripts) {
+  if (!Array.isArray(scripts) || scripts.length > LIMITS.maxScriptsPerTarget) fail('Too many scripts');
+  const counter = { blocks: 0 };
+  for (const s of scripts) { if (!s || !Array.isArray(s.blocks)) fail('Malformed script'); s.blocks.forEach(b => visitBlockTree(b, 0, counter)); }
+  return scripts;
+}
+
 export function validateProject(input) {
   let p = input;
   if (typeof input === 'string') { if (byteLen(input) > LIMITS.maxJsonBytes) fail(`Project is larger than ${LIMITS.maxJsonBytes / 1e6} MB`); try { p = JSON.parse(input); } catch (e) { fail('Project is not valid JSON'); } }
@@ -34,20 +70,8 @@ export function validateProject(input) {
   if (!Array.isArray(p.targets) || p.targets.length < 1) fail('Project has no targets');
   if (p.targets.length > LIMITS.maxTargets) fail(`Too many sprites (max ${LIMITS.maxTargets - 1})`);
   if (p.name !== undefined && (typeof p.name !== 'string' || p.name.length > LIMITS.maxNameLength)) fail('Bad project name');
-  let blocks = 0;
-  const str = (v, what) => { if (typeof v === 'string' && v.length > LIMITS.maxStringLength) fail(`${what} is too long`); };
-  const name = (v, what) => { if (typeof v !== 'string' || v.length > LIMITS.maxNameLength) fail(`Bad ${what} name`); };
-  const visitBlock = (b, depth) => {
-    if (depth > LIMITS.maxDepth) fail(`Blocks nested too deeply (max ${LIMITS.maxDepth})`);
-    if (!b || typeof b !== 'object' || Array.isArray(b) || typeof b.op !== 'string' || b.op.length > 40) fail('Malformed block');
-    if (++blocks > LIMITS.maxBlocks) fail(`Too many blocks (max ${LIMITS.maxBlocks})`);
-    if (b.args !== undefined && !Array.isArray(b.args)) fail('Malformed block args');
-    if ((b.args || []).length > 20) fail('Too many block inputs');
-    for (const a of b.args || []) { if (a && typeof a === 'object') visitBlock(a, depth + 1); else if (a !== null && !['string', 'number', 'boolean'].includes(typeof a)) fail('Malformed block input'); else str(a, 'Input'); }
-    for (const k of ['body', 'body2']) if (b[k] !== undefined) { if (!Array.isArray(b[k])) fail('Malformed block body'); b[k].forEach(x => visitBlock(x, depth + 1)); }
-    if (b.name !== undefined) name(b.name, 'block');
-    if (b.params !== undefined) { if (!Array.isArray(b.params) || b.params.length > 20) fail('Too many block parameters'); b.params.forEach(x => name(x, 'parameter')); }
-  };
+  const counter = { blocks: 0 };
+  const visitBlock = (b, depth) => visitBlockTree(b, depth, counter);
   p.targets.forEach((t, i) => {
     if (!t || typeof t !== 'object') fail('Malformed target');
     name(t.name, 'sprite');

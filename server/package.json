@@ -1,11 +1,20 @@
 {
-  "name": "blockforge-server",
+  "name": "kindlr-server",
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Optional Blockforge Cloud API: accounts + project storage/sharing",
-  "engines": { "node": ">=22" },
+  "description": "Optional Kindlr Cloud API: accounts + project storage/sharing",
+  "engines": {
+    "node": ">=22"
+  },
   "main": "index.js",
-  "scripts": { "start": "node index.js", "test": "node test.mjs" },
-  "dependencies": { "bcryptjs": "^2.4.3", "better-sqlite3": "^11.7.0" }
+  "scripts": {
+    "start": "node index.js",
+    "test": "node test.mjs"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.7.0",
+    "nodemailer": "^10.1.0"
+  }
 }

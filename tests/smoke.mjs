@@ -8,6 +8,6 @@ await p.goto(URL); await p.waitForTimeout(1200);
 await p.screenshot({ path: 'screenshots/01-loaded.png' });
 await p.click('#btn-ignite'); await p.waitForTimeout(2500);
 await p.screenshot({ path: 'screenshots/02-running.png' });
-console.log('threads', await p.evaluate(() => blockforge.runtime.threads.length));
+console.log('threads', await p.evaluate(() => kindlr.runtime.threads.length));
 console.log(errs.join('\n') || 'no console errors');
 await b.close();

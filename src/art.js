@@ -1,4 +1,4 @@
-// Original Blockforge art — all hand-designed simple SVG shapes.
+// Original Kindlr art — all hand-designed simple SVG shapes.
 export const svgUrl = (w, h, inner) =>
   'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${inner}</svg>`);
 const C = (name, w, h, inner, cx = w / 2, cy = h / 2) => ({ name, src: svgUrl(w, h, inner), w, h, cx, cy });
@@ -8,7 +8,7 @@ const eyes = (y, dx = 11, r = 7, lookX = 2) => `
   <circle cx="${50 - dx + lookX}" cy="${y + 1}" r="${r * 0.5}" fill="#1b1b2f"/><circle cx="${50 + dx + lookX}" cy="${y + 1}" r="${r * 0.5}" fill="#1b1b2f"/>
   <circle cx="${50 - dx + lookX + 1.5}" cy="${y - 1}" r="1.4" fill="#fff"/><circle cx="${50 + dx + lookX + 1.5}" cy="${y - 1}" r="1.4" fill="#fff"/>`;
 
-// Sparky: the Blockforge mascot — a friendly ember spirit
+// Sparky: the Kindlr mascot — a friendly flame spirit
 const sparkyBody = (squash = 0) => `
   <defs><radialGradient id="g" cx="50%" cy="65%" r="60%"><stop offset="0" stop-color="#FFD166"/><stop offset=".55" stop-color="#FF8C42"/><stop offset="1" stop-color="#E4572E"/></radialGradient></defs>
   <path d="M50 ${6 + squash} C62 ${22 + squash} 70 ${18 + squash} 72 ${8 + squash} C86 ${30 + squash} 92 50 90 ${66} C88 ${90 - squash / 2} 70 ${100 - squash / 2} 50 ${100 - squash / 2} C30 ${100 - squash / 2} 12 ${90 - squash / 2} 10 66 C8 46 18 ${30 + squash} 30 ${18 + squash} C32 ${28 + squash} 38 ${30 + squash} 42 ${26 + squash} C40 ${18 + squash} 44 ${10 + squash} 50 ${6 + squash}Z" fill="url(#g)" stroke="#B8341B" stroke-width="3" stroke-linejoin="round"/>
@@ -62,5 +62,5 @@ export const SPRITE_LIBRARY = [
   { name: 'Cloud', costumes: cloud }, { name: 'Pointer', costumes: arrow },
 ];
 
-export const LOGO_SVG = `<svg viewBox="0 0 40 40" width="30" height="30" aria-hidden="true"><rect x="3" y="20" width="16" height="16" rx="4" fill="#4C7EF3"/><rect x="21" y="20" width="16" height="16" rx="4" fill="#3DBE6A"/><rect x="12" y="4" width="16" height="16" rx="4" fill="#F28A2E"/><path d="M20 8 c3 3 4 5 2 8 c2-1 3-2 3-4 c2 3 1 6-2 7 h-6 c-3-1-4-4-2-7 c0 2 1 3 2 4 c-1-3 0-5 3-8z" fill="#FFE066"/></svg>`;
+export const LOGO_SVG = `<svg viewBox="0 0 40 40" width="30" height="30" aria-hidden="true"><defs><linearGradient id="kgr" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2a2550"/><stop offset="1" stop-color="#171a2b"/></linearGradient></defs><rect x="1" y="1" width="38" height="38" rx="10" fill="url(#kgr)"/><rect x="8" y="8" width="8" height="25" rx="3" fill="#4C7EF3"/><rect x="15" y="17.5" width="15" height="7.5" rx="3" fill="#3DBE6A" transform="rotate(-42 17 21)"/><rect x="16" y="20" width="16" height="7.5" rx="3" fill="#F28A2E" transform="rotate(42 18 24)"/><path d="M29.5 4.5c2.6 2.4 4 4.4 4 7a4 4 0 0 1-8 0c0-1.7.9-3 1.8-3.8 0 1.1.4 1.8 1 2.2.1-2 .4-3.6 1.2-5.4z" fill="#FFB347" stroke="#E0611F" stroke-width="1"/><path d="M29.5 9.3c.9.9 1.4 1.6 1.4 2.4a1.4 1.4 0 0 1-2.8 0c0-.6.3-1.1.7-1.4 0 .4.2.6.4.7 0-.6.1-1.1.3-1.7z" fill="#FFE066"/></svg>`;
 export const FLAME_SVG = `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 2c3 4 6 6 6 11a6 6 0 0 1-12 0c0-3 2-5 3-6 0 2 1 3 2 4 0-4 0-6 1-9z" fill="#FF8C42" stroke="#B8341B" stroke-width="1.5" stroke-linejoin="round"/><path d="M12 12c1.5 1.5 2.5 2.5 2.5 4a2.5 2.5 0 0 1-5 0c0-1 .5-2 1-2.5 0 1 .5 1.5 1 1.5 0-1.5 0-2 .5-3z" fill="#FFE066"/></svg>`;

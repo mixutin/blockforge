@@ -1,8 +1,17 @@
-# Ember language guide
+# Kindlr Script language guide
 
-Ember is Blockforge's text language. Every block program can be shown as Ember, and every Ember program becomes blocks. Both are the **same tree** and run on the **same tree-walking interpreter** (`src/runtime.js`). Ember is never translated to JavaScript or `eval`'d.
+**Kindlr Script** is the text form of **Kindlr Blocks**. Every block program can be shown as Kindlr Script, and every Kindlr Script program becomes blocks. Both are the **same tree** and run on the **same tree-walking interpreter** (`src/runtime.js`). Kindlr Script is never translated to JavaScript or `eval`'d.
 
-The full list of blocks with their exact Ember spelling is in [BLOCKS.md](BLOCKS.md).
+The full list of blocks with their exact Kindlr Script spelling is in [BLOCKS.md](BLOCKS.md).
+
+## Files
+
+| File | What it is |
+|---|---|
+| `name.kindlr` | A whole project (sprites, costumes, scripts, variables). Download/Open in the editor toolbar. |
+| `name.kls` | Kindlr Script for one sprite (plain UTF-8 text). Use **Download .kls** / **Open .kls** in the Kindlr Script tab, then **Apply to blocks**. |
+
+Kindlr was called *Blockforge* (and the text language *Ember*) before. Nothing changed in the syntax: old `.bforge.json` projects and old scripts open as they are, and autosaved work in the browser is migrated automatically.
 
 ## Scripts
 
@@ -72,7 +81,7 @@ Operators, from lowest to highest precedence:
 | 6 | `*`  `/`  `%` (mod) |
 | 7 | unary `-` |
 
-Comparison is numeric when both sides look like numbers, otherwise case-insensitive text comparison. Like the blocks, Ember is forgiving: text that isn't a number counts as `0` in arithmetic.
+Comparison is numeric when both sides look like numbers, otherwise case-insensitive text comparison. Like the blocks, Kindlr Script is forgiving: text that isn't a number counts as `0` in arithmetic.
 
 ## Menus
 
@@ -102,7 +111,7 @@ print(to_json(@player))            // {"name":"Mika"}
 from_json(@player, "{\"hp\": 3}")
 ```
 
-Variables used in Ember text that don't exist yet are created automatically (for all sprites) when you click **Apply to blocks**.
+Variables used in Kindlr Script that don't exist yet are created automatically (for all sprites) when you click **Apply to blocks**.
 
 ## Custom blocks
 
@@ -159,11 +168,11 @@ Rooms are backdrops: `go_room("level 2")`, `room_name`, and `on_backdrop("level 
 
 ## Limits
 
-The same limits apply to blocks and Ember (see `src/limits.js`):
+The same limits apply to blocks and Kindlr Script (see `src/limits.js`):
 
 | Limit | Value |
 |---|---|
-| Ember source size | 1 MB |
+| Kindlr Script source size | 1 MB |
 | Project JSON size | 5 MB |
 | Nesting depth | 64 |
 | Blocks per project | 20,000 |

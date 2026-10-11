@@ -1,12 +1,12 @@
-# Blockforge block & Ember reference
+# Kindlr block & Kindlr Script reference
 
-_Generated from `src/blocks.js` by `npm run docs`. Every block has an exact Ember text equivalent; both compile to the same tree and run on the same interpreter._
+_Generated from `src/blocks.js` by `npm run docs`. Every block has an exact Kindlr Script equivalent; both compile to the same tree and run on the same interpreter._
 
 Notation: `@name` = variable, `@@name` = list, menu arguments are strings (e.g. `"space"`). Shapes: **hat** starts a script, **C** wraps a body `{ }`, **reporter** returns a value, **boolean** returns true/false.
 
 ## Events
 
-| Block | Ember | Shape | Inputs |
+| Block | Kindlr Script | Shape | Inputs |
 |---|---|---|---|
 | when 🔥 Ignite pressed | `on_ignite { … }` | hat | — |
 | when [key ▾] key pressed | `on_key("space") { … }` | hat | menu: key |
@@ -20,7 +20,7 @@ Notation: `@name` = variable, `@@name` = list, menu arguments are strings (e.g. 
 
 ## Motion
 
-| Block | Ember | Shape | Inputs |
+| Block | Kindlr Script | Shape | Inputs |
 |---|---|---|---|
 | move ( ) steps | `move(10)` | stack · sprite only | number |
 | turn ↻ ( ) degrees | `turn_right(15)` | stack · sprite only | number |
@@ -43,7 +43,7 @@ Notation: `@name` = variable, `@@name` = list, menu arguments are strings (e.g. 
 
 ## Looks
 
-| Block | Ember | Shape | Inputs |
+| Block | Kindlr Script | Shape | Inputs |
 |---|---|---|---|
 | say [ ] for ( ) seconds | `say_for("Hello!", 2)` | stack · sprite only | text, number |
 | say [ ] | `say("Hello!")` | stack · sprite only | text |
@@ -68,7 +68,7 @@ Notation: `@name` = variable, `@@name` = list, menu arguments are strings (e.g. 
 
 ## Sound
 
-| Block | Ember | Shape | Inputs |
+| Block | Kindlr Script | Shape | Inputs |
 |---|---|---|---|
 | play sound [sound ▾] until done | `play_sound_wait("pop")` | stack | menu: sound |
 | start sound [sound ▾] | `play_sound("pop")` | stack | menu: sound |
@@ -83,7 +83,7 @@ Notation: `@name` = variable, `@@name` = list, menu arguments are strings (e.g. 
 
 ## Control
 
-| Block | Ember | Shape | Inputs |
+| Block | Kindlr Script | Shape | Inputs |
 |---|---|---|---|
 | wait ( ) seconds | `wait(1)` | stack | number |
 | repeat ( ) | `repeat(10) { … }` | C | number |
@@ -101,7 +101,7 @@ Notation: `@name` = variable, `@@name` = list, menu arguments are strings (e.g. 
 
 ## Sensing
 
-| Block | Ember | Shape | Inputs |
+| Block | Kindlr Script | Shape | Inputs |
 |---|---|---|---|
 | touching [touch ▾] ? | `touching("_mouse_")` | boolean · sprite only | menu: touch |
 | touching color (color) ? | `touching_color("#3DBE6A")` | boolean · sprite only | color "#rrggbb" |
@@ -120,7 +120,7 @@ Notation: `@name` = variable, `@@name` = list, menu arguments are strings (e.g. 
 
 ## Operators
 
-| Block | Ember | Shape | Inputs |
+| Block | Kindlr Script | Shape | Inputs |
 |---|---|---|---|
 | ( ) + ( ) | `a + b` | reporter | number, number |
 | ( ) - ( ) | `a - b` | reporter | number, number |
@@ -143,7 +143,7 @@ Notation: `@name` = variable, `@@name` = list, menu arguments are strings (e.g. 
 
 ## Variables
 
-| Block | Ember | Shape | Inputs |
+| Block | Kindlr Script | Shape | Inputs |
 |---|---|---|---|
 | set [var ▾] to [ ] | `set(@var, 0)` | stack | menu: var, text |
 | change [var ▾] by ( ) | `change(@var, 1)` | stack | menu: var, number |
@@ -152,7 +152,7 @@ Notation: `@name` = variable, `@@name` = list, menu arguments are strings (e.g. 
 
 ## Lists
 
-| Block | Ember | Shape | Inputs |
+| Block | Kindlr Script | Shape | Inputs |
 |---|---|---|---|
 | add [ ] to [list ▾] | `list_add("thing", @@list)` | stack | text, menu: list |
 | delete ( ) of [list ▾] | `list_delete(1, @@list)` | stack | number, menu: list |
@@ -168,7 +168,7 @@ Notation: `@name` = variable, `@@name` = list, menu arguments are strings (e.g. 
 
 ## Pen
 
-| Block | Ember | Shape | Inputs |
+| Block | Kindlr Script | Shape | Inputs |
 |---|---|---|---|
 | erase all | `pen_clear` | stack | — |
 | stamp | `stamp` | stack · sprite only | — |
@@ -181,7 +181,7 @@ Notation: `@name` = variable, `@@name` = list, menu arguments are strings (e.g. 
 
 ## Console & UI
 
-| Block | Ember | Shape | Inputs |
+| Block | Kindlr Script | Shape | Inputs |
 |---|---|---|---|
 | print [ ] | `print("Hello, world!")` | stack | text |
 | clear console | `clear_console` | stack | — |
@@ -200,7 +200,7 @@ Notation: `@name` = variable, `@@name` = list, menu arguments are strings (e.g. 
 
 ## Data
 
-| Block | Ember | Shape | Inputs |
+| Block | Kindlr Script | Shape | Inputs |
 |---|---|---|---|
 | true | `true` | boolean | — |
 | false | `false` | boolean | — |
@@ -225,7 +225,7 @@ Notation: `@name` = variable, `@@name` = list, menu arguments are strings (e.g. 
 
 ## Game
 
-| Block | Ember | Shape | Inputs |
+| Block | Kindlr Script | Shape | Inputs |
 |---|---|---|---|
 | every ( ) seconds | `every(1) { … }` | hat | number |
 | when drawing (every frame) | `on_draw { … }` | hat | — |
@@ -251,12 +251,12 @@ Notation: `@name` = variable, `@@name` = list, menu arguments are strings (e.g. 
 
 ## My Blocks
 
-| Block | Ember | Shape | Inputs |
+| Block | Kindlr Script | Shape | Inputs |
 |---|---|---|---|
 
 ## My Blocks
 
-| Form | Ember |
+| Form | Kindlr Script |
 |---|---|
 | define a block | `define name(a, b) { … }` |
 | define, run without screen refresh | `define! name(a, b) { … }` |
@@ -265,7 +265,7 @@ Notation: `@name` = variable, `@@name` = list, menu arguments are strings (e.g. 
 
 ## Variables & lists
 
-| Form | Ember |
+| Form | Kindlr Script |
 |---|---|
 | variable reporter | `@score` or `@"my score"` |
 | list reporter | `@@items` or `@@"my items"` |

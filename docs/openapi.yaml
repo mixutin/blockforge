@@ -1,0 +1,253 @@
+openapi: 3.1.0
+info:
+  title: Kindlr Cloud API
+  version: 2.0.0
+  summary: Accounts, email verification, password reset, project storage and sharing for Kindlr.
+  description: |
+    Optional companion API for the Kindlr editor (Kindlr Blocks + Kindlr Script). All routes live under `/api/`.
+
+    **Auth.** Browser sessions use the `__Host-blocks_session` cookie (Secure, HttpOnly, SameSite=Strict).
+    State-changing cookie requests must send an `Origin` header that matches `ALLOWED_ORIGIN`.
+    API tokens (`Authorization: Bearer kl_…`) are accepted on `/api/projects*` only.
+
+    **Errors** are JSON: `{"error": "message", "code"?: "unverified"}`.
+  license: { name: MIT, identifier: MIT }
+servers:
+  - url: /
+tags:
+  - { name: auth, description: Sign up, sign in, sessions }
+  - { name: email, description: Email verification and password reset }
+  - { name: account, description: Account settings }
+  - { name: tokens, description: API tokens (verified accounts) }
+  - { name: projects, description: Your projects }
+  - { name: sharing, description: Public projects, Explore, remix }
+components:
+  securitySchemes:
+    session: { type: apiKey, in: cookie, name: __Host-blocks_session }
+    bearer: { type: http, scheme: bearer, description: "API token: kl_ + 43 base64url chars" }
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties: { error: { type: string }, code: { type: string, enum: [unverified] } }
+    User:
+      type: object
+      properties:
+        username: { type: string, pattern: "^[A-Za-z0-9_]{3,24}$" }
+        email: { type: [string, "null"], format: email }
+        email_verified: { type: boolean }
+    Token: { type: string, pattern: "^[A-Za-z0-9_-]{43}$", description: 32 random bytes, base64url, single use }
+    ShareId: { type: string, pattern: "^[A-Za-z0-9_-]{22}$", description: 128-bit random id, unrelated to the project id }
+    ProjectSummary:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        is_public: { type: boolean }
+        share_id: { oneOf: [{ $ref: "#/components/schemas/ShareId" }, { type: "null" }] }
+        description: { type: string, maxLength: 1000 }
+        notes: { type: string, maxLength: 5000 }
+        updated_at: { type: integer, description: ms since epoch }
+    ProjectInput:
+      type: object
+      required: [data]
+      properties:
+        name: { type: string, maxLength: 120 }
+        data: { type: string, description: "Project JSON (.kindlr) as a string, ≤ 5 MB, validated: op allow-list, limits, data: image costumes" }
+        description: { type: string, maxLength: 1000 }
+        notes: { type: string, maxLength: 5000 }
+    PublicProject:
+      type: object
+      properties:
+        share_id: { $ref: "#/components/schemas/ShareId" }
+        title: { type: string }
+        author: { type: string }
+        description: { type: string }
+        notes: { type: string }
+        data: { type: string }
+        shared_at: { type: integer }
+        updated_at: { type: integer }
+    Ok: { type: object, properties: { ok: { type: boolean, const: true } } }
+  responses:
+    Error: { description: Error, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    Ok: { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Ok" } } } }
+paths:
+  /api/signup:
+    post:
+      tags: [auth]
+      summary: Create an account (sends a verification email)
+      description: Rate-limited at the proxy (auth zone). The new account is unverified until the emailed link is used.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [username, email, password], properties: { username: { type: string }, email: { type: string, format: email }, password: { type: string, minLength: 8, maxLength: 200 } } } } }
+      responses:
+        "201": { description: Created; session cookie set, content: { application/json: { schema: { type: object, properties: { user: { $ref: "#/components/schemas/User" } } } } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /api/login:
+    post:
+      tags: [auth]
+      summary: Sign in with username and password
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [username, password], properties: { username: { type: string }, password: { type: string } } } } } }
+      responses:
+        "200": { description: Signed in; session cookie set, content: { application/json: { schema: { type: object, properties: { user: { $ref: "#/components/schemas/User" } } } } } }
+        "401": { $ref: "#/components/responses/Error" }
+  /api/logout:
+    post: { tags: [auth], summary: Sign out (clears the cookie), responses: { "200": { $ref: "#/components/responses/Ok" } } }
+  /api/me:
+    get:
+      tags: [auth]
+      summary: Current user (or null)
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object, properties: { user: { oneOf: [{ $ref: "#/components/schemas/User" }, { type: "null" }] } } } } } } }
+  /api/health:
+    get: { summary: Health check, responses: { "200": { $ref: "#/components/responses/Ok" } } }
+  /api/verify:
+    post:
+      tags: [email]
+      summary: Verify an email address with the token from the link
+      description: "Link format: `PUBLIC_URL/verify?token=<token>`. Single use, expires after 24 h."
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [token], properties: { token: { $ref: "#/components/schemas/Token" } } } } } }
+      responses:
+        "200": { description: Verified, content: { application/json: { schema: { type: object, properties: { ok: { type: boolean }, email_verified: { type: boolean } } } } } }
+        "400": { $ref: "#/components/responses/Error" }
+  /api/verify/resend:
+    post:
+      tags: [email]
+      security: [{ session: [] }]
+      summary: Resend the verification email (max 3 per hour per account)
+      responses:
+        "200": { description: Sent (or already verified), content: { application/json: { schema: { type: object, properties: { ok: { type: boolean }, remaining: { type: integer }, already_verified: { type: boolean } } } } } }
+        "401": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+  /api/password/forgot:
+    post:
+      tags: [email]
+      summary: Request a password-reset email
+      description: Always returns the same response for any well-formed address, so it can't be used to find accounts.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [email], properties: { email: { type: string, format: email } } } } } }
+      responses:
+        "200": { description: Always the same message, content: { application/json: { schema: { type: object, properties: { ok: { type: boolean }, message: { type: string } } } } } }
+        "400": { $ref: "#/components/responses/Error" }
+  /api/password/reset:
+    post:
+      tags: [email]
+      summary: Set a new password with a reset token (single use, 1 h)
+      description: Signs the account out everywhere and revokes its API tokens.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [token, password], properties: { token: { $ref: "#/components/schemas/Token" }, password: { type: string, minLength: 8, maxLength: 200 } } } } } }
+      responses: { "200": { $ref: "#/components/responses/Ok" }, "400": { $ref: "#/components/responses/Error" } }
+  /api/account/password:
+    post:
+      tags: [account]
+      security: [{ session: [] }]
+      summary: Change password (signs out other sessions, issues a new cookie)
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [current_password, new_password], properties: { current_password: { type: string }, new_password: { type: string, minLength: 8 } } } } } }
+      responses: { "200": { $ref: "#/components/responses/Ok" }, "403": { $ref: "#/components/responses/Error" } }
+  /api/account/email:
+    post:
+      tags: [account]
+      security: [{ session: [] }]
+      summary: Change email (the account must verify the new address again)
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [email, password], properties: { email: { type: string, format: email }, password: { type: string } } } } } }
+      responses:
+        "200": { description: Changed, content: { application/json: { schema: { type: object, properties: { user: { $ref: "#/components/schemas/User" } } } } } }
+        "403": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+  /api/account/delete:
+    post:
+      tags: [account]
+      security: [{ session: [] }]
+      summary: Delete the account, its projects, share links and tokens
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [password, confirm], properties: { password: { type: string }, confirm: { type: string, description: must equal the username } } } } } }
+      responses: { "200": { $ref: "#/components/responses/Ok" }, "400": { $ref: "#/components/responses/Error" }, "403": { $ref: "#/components/responses/Error" } }
+  /api/tokens:
+    get:
+      tags: [tokens]
+      security: [{ session: [] }]
+      summary: List API tokens (never returns the secrets)
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object, properties: { tokens: { type: array, items: { type: object, properties: { id: { type: string }, name: { type: string }, created_at: { type: integer }, last_used_at: { type: [integer, "null"] } } } } } } } } } }
+    post:
+      tags: [tokens]
+      security: [{ session: [] }]
+      summary: Create an API token (verified accounts only; the secret is shown once)
+      requestBody: { content: { application/json: { schema: { type: object, properties: { name: { type: string, maxLength: 60 } } } } } }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { type: object, properties: { id: { type: string }, name: { type: string }, token: { type: string } } } } } }
+        "403": { $ref: "#/components/responses/Error" }
+  /api/tokens/{id}:
+    delete:
+      tags: [tokens]
+      security: [{ session: [] }]
+      summary: Revoke an API token
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { "200": { $ref: "#/components/responses/Ok" } }
+  /api/projects:
+    get:
+      tags: [projects]
+      security: [{ session: [] }, { bearer: [] }]
+      summary: List my projects
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object, properties: { projects: { type: array, items: { $ref: "#/components/schemas/ProjectSummary" } } } } } } } }
+    post:
+      tags: [projects]
+      security: [{ session: [] }, { bearer: [] }]
+      summary: Create a private project
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/ProjectInput" } } } }
+      responses:
+        "201": { description: Created, content: { application/json: { schema: { type: object, properties: { id: { type: string } } } } } }
+        "413": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+  /api/projects/{id}:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+    get: { tags: [projects], security: [{ session: [] }, { bearer: [] }], summary: Read one of my projects, responses: { "200": { description: OK }, "404": { $ref: "#/components/responses/Error" } } }
+    put:
+      tags: [projects]
+      security: [{ session: [] }, { bearer: [] }]
+      summary: Overwrite one of my projects (owner only; others get 404)
+      requestBody: { required: true, content: { application/json: { schema: { $ref: "#/components/schemas/ProjectInput" } } } }
+      responses: { "200": { description: OK }, "404": { $ref: "#/components/responses/Error" }, "422": { $ref: "#/components/responses/Error" } }
+    patch:
+      tags: [projects]
+      security: [{ session: [] }, { bearer: [] }]
+      summary: Update title, description or notes
+      requestBody: { content: { application/json: { schema: { type: object, properties: { name: { type: string }, description: { type: string }, notes: { type: string } } } } } }
+      responses: { "200": { description: OK }, "404": { $ref: "#/components/responses/Error" } }
+    delete: { tags: [projects], security: [{ session: [] }, { bearer: [] }], summary: Delete one of my projects (its share link dies too), responses: { "200": { $ref: "#/components/responses/Ok" } } }
+  /api/projects/{id}/share:
+    parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+    post:
+      tags: [sharing]
+      security: [{ session: [] }, { bearer: [] }]
+      summary: Publish (public:true, confirm:true; verified accounts only) or unshare (public:false)
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [public], properties: { public: { type: boolean }, confirm: { type: boolean }, title: { type: string }, description: { type: string }, notes: { type: string } } } } } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { id: { type: string }, is_public: { type: boolean }, share_id: { oneOf: [{ $ref: "#/components/schemas/ShareId" }, { type: "null" }] }, url: { type: string } } } } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+    delete: { tags: [sharing], security: [{ session: [] }, { bearer: [] }], summary: Unshare (revokes the link; sharing again creates a new id), responses: { "200": { description: OK } } }
+  /api/shared/{shareId}:
+    get:
+      tags: [sharing]
+      summary: Read a public project (anonymous)
+      parameters: [{ name: shareId, in: path, required: true, schema: { $ref: "#/components/schemas/ShareId" } }]
+      responses: { "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/PublicProject" } } } }, "404": { $ref: "#/components/responses/Error" } }
+  /api/embed/{shareId}:
+    get:
+      tags: [sharing]
+      security: []
+      summary: Data for the embeddable player page /embed/<share-id>. Handled before any auth, so cookies and tokens are ignored. Returns ETag; supports If-None-Match (304)
+      parameters: [{ name: shareId, in: path, required: true, schema: { $ref: "#/components/schemas/ShareId" } }]
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object, properties: { share_id: { type: string }, title: { type: string }, author: { type: string }, data: { type: string, description: "Project JSON (.kindlr) as a string" }, updated_at: { type: integer } } } } } }, "304": { description: Not modified }, "404": { $ref: "#/components/responses/Error" }, "405": { $ref: "#/components/responses/Error" } }
+  /api/shared/{shareId}/remix:
+    post:
+      tags: [sharing]
+      security: [{ session: [] }]
+      summary: Copy a public project into my account as a private project
+      parameters: [{ name: shareId, in: path, required: true, schema: { $ref: "#/components/schemas/ShareId" } }]
+      responses: { "201": { description: Created, content: { application/json: { schema: { type: object, properties: { id: { type: string }, name: { type: string } } } } } }, "401": { $ref: "#/components/responses/Error" } }
+  /api/explore:
+    get:
+      tags: [sharing]
+      summary: Recent public projects, newest first
+      parameters:
+        - { name: page, in: query, schema: { type: integer, minimum: 1, maximum: 1000, default: 1 } }
+        - { name: per, in: query, schema: { type: integer, minimum: 1, maximum: 48, default: 24 } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object, properties: { projects: { type: array, items: { type: object, properties: { share_id: { type: string }, title: { type: string }, author: { type: string }, description: { type: string }, shared_at: { type: integer }, updated_at: { type: integer } } } }, page: { type: integer }, per: { type: integer }, has_more: { type: boolean } } } } } } }

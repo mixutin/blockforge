@@ -1,4 +1,4 @@
-// Blockforge block language ("Ember") — block shape definitions.
+// Kindlr block language (Kindlr Blocks) — block shape definitions.
 // spec placeholders: %n number, %s text, %b boolean, %k color, %m.<menu> dropdown
 export const CATEGORIES = [
   { id: 'events', name: 'Events', color: '#E6B422' },
@@ -237,7 +237,11 @@ add('myblocks', 'define', 'hat', 'define', [], 'define');
 add('myblocks', 'call', 'stack', '', [], 'call');
 add('myblocks', 'param', 'reporter', '%v', [''], 'param');
 
-export const DEFS = Object.fromEntries(D.map(d => [d.op, d]));
+// Null-prototype + frozen: DEFS['__proto__'] / DEFS['constructor'] are simply undefined.
+export const DEFS = Object.freeze(Object.assign(Object.create(null), Object.fromEntries(D.map(d => [d.op, d]))));
+export const OPS = new Set(Object.keys(DEFS));
+/** Allow-list check for block op names (client parser, JSON import, player and server). */
+export const isKnownOp = op => typeof op === 'string' && OPS.has(op);
 export const DEF_LIST = D;
 
 // Parse spec into parts: [{t:'text',v}, {t:'arg',kind,menu,idx}]

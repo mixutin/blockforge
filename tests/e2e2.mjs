@@ -31,28 +31,28 @@ await p.locator('.player-modal .actions button', { hasText: 'Close' }).click();
 // ---- program mode example
 await example(4); await p.click('#btn-ignite'); await p.waitForTimeout(600);
 await p.fill('#widgets .w-textbox', 'Buy milk'); await p.click('#widgets .w-button >> text=Add note'); await p.waitForTimeout(300);
-await p.fill('#widgets .w-textbox', 'Ship Blockforge'); await p.click('#widgets .w-button >> text=Add note'); await p.waitForTimeout(300);
+await p.fill('#widgets .w-textbox', 'Ship Kindlr'); await p.click('#widgets .w-button >> text=Add note'); await p.waitForTimeout(300);
 const con = await p.textContent('#console-out');
 assert(con.includes('Added: Buy milk') && con.includes('Welcome!'), 'console output + widget click events');
-const notes = await p.evaluate(() => blockforge.project.targets[0].lists.notes);
+const notes = await p.evaluate(() => kindlr.project.targets[0].lists.notes);
 assert(notes.length === 2, 'notes list filled: ' + JSON.stringify(notes));
-const stats = await p.evaluate(() => JSON.stringify(blockforge.project.targets[0].variables.stats));
+const stats = await p.evaluate(() => JSON.stringify(kindlr.project.targets[0].variables.stats));
 assert(stats === '{"added":2}', 'map value updated: ' + stats);
-assert(await p.evaluate(() => blockforge.project.storage.visits) == 1, 'project storage saved (visits=1)');
+assert(await p.evaluate(() => kindlr.project.storage.visits) == 1, 'project storage saved (visits=1)');
 await p.locator('#widgets .w-slider').fill('5'); await p.locator('#widgets .w-slider').dispatchEvent('change'); await p.waitForTimeout(300);
 assert((await p.textContent('#widgets .w-label >> nth=1')).includes('5'), 'slider change event updates label');
-assert(await p.evaluate(() => blockforge.runtime.drawQueue.length) >= 5, 'draw event drew shapes this frame');
+assert(await p.evaluate(() => kindlr.runtime.drawQueue.length) >= 5, 'draw event drew shapes this frame');
 await p.screenshot({ path: 'screenshots/12-program-mode-notes-app.png' });
 await p.click('#btn-ignite'); await p.waitForTimeout(400);
-assert(await p.evaluate(() => blockforge.project.storage.visits) == 2, 'storage persists across runs (visits=2)');
+assert(await p.evaluate(() => kindlr.project.storage.visits) == 2, 'storage persists across runs (visits=2)');
 
 // ---- physics example
 await example(5); await p.click('#btn-ignite'); await p.waitForTimeout(400);
-const y1 = await p.evaluate(() => blockforge.project.targets[1].y); await p.waitForTimeout(700);
-const y2 = await p.evaluate(() => blockforge.project.targets[1].y);
+const y1 = await p.evaluate(() => kindlr.project.targets[1].y); await p.waitForTimeout(700);
+const y2 = await p.evaluate(() => kindlr.project.targets[1].y);
 assert(y2 < y1, `gravity pulls ball down (${Math.round(y1)} → ${Math.round(y2)})`);
 await p.keyboard.press('Space'); await p.waitForTimeout(80);
-assert(await p.evaluate(() => blockforge.project.targets[1].vy) > 0, 'space adds upward velocity');
+assert(await p.evaluate(() => kindlr.project.targets[1].vy) > 0, 'space adds upward velocity');
 await p.waitForTimeout(600); await p.screenshot({ path: 'screenshots/13-physics-playground.png' });
 await p.click('#btn-stop');
 
@@ -65,13 +65,13 @@ assert((await p.textContent('#text-status')).includes('Applied'), 'guard test pr
 await p.click('#btn-ignite');
 const frames = await p.evaluate(() => new Promise(r => { let n = 0; const t0 = performance.now(); const f = () => { n++; performance.now() - t0 < 1000 ? requestAnimationFrame(f) : r(n); }; requestAnimationFrame(f); }));
 assert(frames > 20, `UI stays responsive during an infinite no-refresh loop (${frames} fps)`);
-assert(await p.evaluate(() => blockforge.project.targets[0].variables.n) > 1000, 'loop still makes progress under the step budget');
+assert(await p.evaluate(() => kindlr.project.targets[0].variables.n) > 1000, 'loop still makes progress under the step budget');
 await p.click('.tab[data-tab="blocks"]'); await p.focus('#stage'); await p.mouse.click(1300, 200);
 await p.keyboard.press('r'); await p.waitForTimeout(500);
 assert((await p.textContent('#toast')).includes('recursion'), 'runaway recursion stopped: ' + await p.textContent('#toast'));
-await p.click('#btn-stop'); assert(await p.evaluate(() => blockforge.runtime.threads.length) === 0, 'stop button halts everything');
-errs.length = errs.filter(e => !e.includes('[Blockforge runtime]')).length ? errs.length : 0;
-const filtered = errs.filter(e => !e.includes('[Blockforge runtime]')); errs.splice(0, errs.length, ...filtered);
+await p.click('#btn-stop'); assert(await p.evaluate(() => kindlr.runtime.threads.length) === 0, 'stop button halts everything');
+errs.length = errs.filter(e => !e.includes('[Kindlr runtime]')).length ? errs.length : 0;
+const filtered = errs.filter(e => !e.includes('[Kindlr runtime]')); errs.splice(0, errs.length, ...filtered);
 
 // ---- cloud: account, save, share, open shared link in sandboxed player
 const user = 'tester' + Date.now() % 100000;
@@ -83,12 +83,12 @@ await p.click('#btn-cloud'); await p.click('.modal button.primary'); await p.wai
 assert((await p.locator('.cloud-row').count()) === 1, 'project saved to cloud');
 await p.click('.cloud-row button >> text=Share'); await p.waitForTimeout(800);
 await p.screenshot({ path: 'screenshots/14-cloud-projects.png' });
-const cid = await p.evaluate(() => blockforge.cloudId);
+const cid = await p.evaluate(() => kindlr.cloudId);
 const p2 = await ctx.newPage(); watch(p2); await p2.goto(URL + '#share=' + cid); await p2.waitForTimeout(1800);
 assert(await p2.locator('.player-modal').count() === 1, 'shared link opens in the sandboxed player first');
 await p2.screenshot({ path: 'screenshots/15-shared-link-player.png' });
 await p2.click('.player-modal button >> text=See inside'); await p2.waitForTimeout(300);
-assert(await p2.evaluate(() => blockforge.project.name) === 'Hello Sparky', '"See inside" loads the shared project into the editor');
+assert(await p2.evaluate(() => kindlr.project.name) === 'Hello Sparky', '"See inside" loads the shared project into the editor');
 console.log(errs.length ? 'CONSOLE ISSUES:\n' + errs.join('\n') : '✔ no console errors or warnings');
 if (errs.length) process.exitCode = 1;
 await b.close();

@@ -35,6 +35,6 @@ export const SOUNDS = {
   jump: v => { osc('triangle', 300, 900, 0.18, 0.5 * v); return 0.18; },
   win: v => { [523, 659, 784, 1047].forEach((f, i) => osc('triangle', f, f, 0.18, 0.4 * v, i * 0.12)); return 0.6; },
 };
-export function playSound(name, volume = 100) { const f = SOUNDS[name] || SOUNDS.pop; return f(Math.max(0, Math.min(1, volume / 100))); }
+export function playSound(name, volume = 100) { const f = (typeof name === 'string' && Object.hasOwn(SOUNDS, name)) ? SOUNDS[name] : SOUNDS.pop; return f(Math.max(0, Math.min(1, volume / 100))); }
 export function playTone(freq, secs, wave = 'square', volume = 100) { if (freq > 0 && secs > 0) osc(wave, freq, freq, secs, 0.3 * Math.max(0, Math.min(1, volume / 100))); }
 export function stopAll() { for (const n of active) { try { n.stop(); } catch (e) {} } active.clear(); }

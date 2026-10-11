@@ -3,31 +3,33 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Blockforge — build with Ember blocks</title>
+<title>Kindlr: make games and programs with blocks and script</title>
 <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-<meta name="description" content="Blockforge: a block-based visual programming studio with its own language, Ember." />
+<meta name="description" content="Kindlr: a visual programming studio. Build games and programs with Kindlr Blocks or Kindlr Script, then share them with a link." />
 </head>
 <body>
 <header id="topbar">
-  <div class="brand"><span id="logo"></span><b>Block<span>forge</span></b></div>
+  <a class="brand" href="./" aria-label="Kindlr home"><span id="logo"></span><b>Kind<span>lr</span></b></a>
   <div class="menus">
-    <button id="btn-new" title="New project">New</button>
-    <button id="btn-open" title="Open a .bforge.json file">Open</button>
-    <button id="btn-save" title="Download project as JSON">Save</button>
-    <div class="dropdown"><button id="btn-examples">Examples ▾</button><div class="dd-menu" id="examples-menu"></div></div>
-    <button id="btn-cloud" title="Cloud projects (needs account)">☁ Cloud</button>
-    <input type="file" id="file-input" accept=".json,application/json" hidden />
+    <button id="btn-new" title="New project" data-icon="new">New</button>
+    <button id="btn-open" title="Open a .kindlr project (or an old .bforge.json, or a .kls script) from your computer" data-icon="open">Open</button>
+    <button id="btn-save" title="Download this project as a .kindlr file" data-icon="save">Download</button>
+    <div class="dropdown"><button id="btn-examples" title="Open an example project" aria-haspopup="menu" aria-expanded="false" data-icon="examples">Examples</button><div class="dd-menu" id="examples-menu" role="menu"></div></div>
+    <button id="btn-cloud" title="My cloud projects: save, save as new, open" data-icon="cloud">My projects</button>
+    <a id="lnk-explore" class="btn" href="./explore" title="Browse projects other people shared" data-icon="explore">Explore</a>
+    <input type="file" id="file-input" accept=".kindlr,.kls,.json,application/json" hidden />
   </div>
-  <input id="project-name" spellcheck="false" aria-label="Project name" />
+  <input id="project-name" spellcheck="false" aria-label="Project name" maxlength="120" />
+  <span id="save-status" aria-live="polite"></span>
   <div class="spacer"></div>
-  <span id="save-status"></span>
-  <button id="btn-account" class="ghost">Sign in</button>
-  <button id="btn-theme" class="ghost" title="Toggle light/dark theme">◐</button>
+  <button id="btn-share" class="share-btn" title="Share this project: public link, embed code and QR code" data-icon="share">Share</button>
+  <button id="btn-account" class="ghost acct-btn" title="Sign in or manage your account">Sign in</button>
+  <button id="btn-theme" class="ghost icon-only" title="Switch between dark and light theme" aria-label="Switch theme" data-icon="theme"></button>
   <div class="run">
-    <button id="btn-ignite" title="Ignite (start all 'when Ignite pressed' scripts)"><span id="ignite-icon"></span>Ignite</button>
-    <button id="btn-stop" title="Stop everything"><svg viewBox="0 0 20 20" width="16" height="16"><polygon points="6,1 14,1 19,6 19,14 14,19 6,19 1,14 1,6" fill="#ef4f5f"/></svg></button>
-    <button id="btn-full" title="Fullscreen stage">⛶</button>
-    <button id="btn-player" title="Run in the isolated sandboxed player">▶ Player</button>
+    <button id="btn-ignite" title="Ignite: start all “when Ignite pressed” scripts"><span id="ignite-icon"></span><span class="lbl-keep">Ignite</span></button>
+    <button id="btn-stop" title="Stop everything" aria-label="Stop"><svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><polygon points="6,1 14,1 19,6 19,14 14,19 6,19 1,14 1,6" fill="#ef4f5f"/></svg></button>
+    <button id="btn-full" class="icon-only" title="Fullscreen stage" aria-label="Fullscreen stage" data-icon="full"></button>
+    <button id="btn-player" title="Run in the isolated sandboxed player" data-icon="play">Player</button>
   </div>
 </header>
 <main id="app">
@@ -36,7 +38,7 @@
   <section id="center">
     <div class="tabs">
       <button class="tab on" data-tab="blocks">Blocks</button>
-      <button class="tab" data-tab="text">Ember text</button>
+      <button class="tab" data-tab="text">Kindlr Script</button>
       <button class="tab" data-tab="costumes" id="tab-costumes">Costumes</button>
       <div class="spacer"></div>
       <span id="editing-label"></span>
@@ -51,13 +53,15 @@
       <div class="text-bar">
         <button id="text-refresh">⟲ From blocks</button>
         <button id="text-apply" class="primary">Apply to blocks →</button>
-        <span id="text-status"></span>
+        <span id="text-status" aria-live="polite"></span>
         <div class="spacer"></div>
-        <a href="#" id="text-help-btn">Ember syntax</a>
+        <button id="text-download" title="Download this sprite's Kindlr Script as a .kls file">Download .kls</button>
+        <button id="text-open" title="Load a .kls file into the editor (then press Apply)">Open .kls</button>
+        <a href="#" id="text-help-btn">Kindlr Script syntax</a>
       </div>
       <div class="code-wrap"><pre id="code-hl" aria-hidden="true"></pre><textarea id="code" spellcheck="false" wrap="off"></textarea></div>
       <div id="text-help" hidden>
-<b>Ember quick reference</b>
+<b>Kindlr Script quick reference</b>
 <pre>on_ignite { ... }              // hat: when Ignite pressed
 on_key("space") { ... }        on_click { ... }     on_message("go") { ... }
 move(10)  turn_right(15)  go_xy(0, 0)  say_for("Hi", 2)  wait(1)

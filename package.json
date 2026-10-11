@@ -1,10 +1,10 @@
 {
-  "name": "blockforge",
+  "name": "kindlr",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "node tests/ember.test.mjs && node tests/limits.test.mjs && cd server && node test.mjs",
+    "test": "node tests/kls.test.mjs && node tests/limits.test.mjs && node tests/proto.test.mjs && cd server && node test.mjs",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
@@ -15,11 +15,15 @@
   "author": "",
   "license": "ISC",
   "devDependencies": {
+    "autocannon": "^7.15.0",
     "playwright": "1.47",
     "vite": "^5.4.21"
   },
   "type": "module",
   "engines": {
     "node": ">=22"
+  },
+  "dependencies": {
+    "qrcode-generator": "^1.5.2"
   }
 }

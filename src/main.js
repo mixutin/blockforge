@@ -1,52 +1,64 @@
+import './migrate.js';
 import './style.css';
 import { CATEGORIES, DEFS, DEF_LIST, MENUS_STATIC, newBlock, clone, isReporterType } from './blocks.js';
 import { Runtime } from './runtime.js';
 import { Blocks } from './workspace.js';
-import { Paint } from './paint.js';
-import { targetToText, parseEmber, highlight } from './ember.js';
+import { targetToText, parseKls, highlight } from './kls.js';
 import { blankProject, exampleProjects, makeTarget, layoutScripts } from './project.js';
 import { getImg, costumeOf, W, H } from './stage.js';
 import * as art from './art.js';
-import { cloud } from './cloud.js';
+import { cloud, shareUrl, embedUrl, pageUrl } from './cloud.js';
+import { ICONS, iconize } from './icons.js';
 import { validateProject } from './limits.js';
-import { openPlayer } from './playerhost.js';
+// Lazy chunks (code-split; not needed for the editor's first paint): paint editor, QR code, sandboxed player host.
+const lazyPaint = () => import('./paint.js');
+const lazyQr = () => import('./qr.js');
+const openPlayer = (...args) => import('./playerhost.js').then(m => m.openPlayer(...args));
 import { syncWidgets } from './widgets.js';
 import { LIMITS } from './limits.js';
+import { has, get, put, dict, RESERVED_NAMES } from './safe.js';
 
 const $ = id => document.getElementById(id);
 const h = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt !== undefined) e.textContent = txt; return e; };
-const AUTOSAVE = 'blockforge.autosave.v1';
+const AUTOSAVE = 'kindlr.autosave.v1';
+const CLOUDREF = 'kindlr.cloudref.v1';
 const SPECIAL = { _random_: 'random position', _mouse_: 'mouse-pointer', _edge_: 'edge', _myself_: 'myself', _stage_: 'Stage' };
 
 class App {
   constructor() {
     this.categories = CATEGORIES; this.runtime = new Runtime(this);
-    this.blocks = new Blocks(this); this.paint = new Paint(this);
+    this.blocks = new Blocks(this); this.paint = null;
+    // warm the lazy chunks once the editor is idle, so the first click on Costumes / Share / Player is instant
+    const idle = window.requestIdleCallback || (f => setTimeout(f, 1500)); idle(() => { lazyPaint(); lazyQr(); import('./playerhost.js'); });
     this.tab = 'blocks'; this.dirty = false; this.stageScale = 1;
     this.initChrome(); this.initStage(); this.initText(); this.initCostumes();
     const saved = this.readAutosave();
     const share = location.hash.match(/share=([\w-]+)/);
     if (share) this.loadShared(share[1]);
-    this.loadProject(saved || exampleProjects()[0], !!saved);
+    this.loadProject(saved || exampleProjects()[0], !!saved, saved ? this.readCloudRef() : null);
+    this.openFromHash();
+    window.addEventListener('hashchange', () => { const m = location.hash.match(/share=([\w-]+)/); if (m) this.loadShared(m[1]); else this.openFromHash(); });
     requestAnimationFrame(() => this.frame());
-    if (localStorage.getItem('blockforge.cloud')) cloud.me().then(u => this.setUser(u)).catch(() => this.setUser(null));
+    if (localStorage.getItem('kindlr.cloud') && !/cloud=/.test(location.hash)) cloud.me().then(u => this.setUser(u)).catch(() => this.setUser(null));
   }
 
   // ------------------------------------------------ project
   get project() { return this._project; }
   normalize(p) {
-    if (!p || !Array.isArray(p.targets) || !p.targets.length) throw new Error('Not a Blockforge project');
+    if (!p || !Array.isArray(p.targets) || !p.targets.length) throw new Error('Not a Kindlr project');
     p.monitors ||= []; p.name ||= 'Untitled project';
     for (const t of p.targets) {
-      Object.assign(t, { ...makeTarget(t.name, []), ...t, costumes: t.costumes || [], scripts: t.scripts || [], variables: t.variables || {}, lists: t.lists || {} });
+      Object.assign(t, { ...makeTarget(t.name, []), ...t, costumes: t.costumes || [], scripts: t.scripts || [], variables: dict(t.variables), lists: dict(t.lists) });
       if (!t.costumes.length) t.costumes.push(clone(t.isStage ? art.backdrops.blank : art.ball[0]));
-      t.effects = {}; t.bubble = null;
+      t.effects = dict(); t.bubble = null;
     }
     if (!p.targets[0].isStage) throw new Error('First target must be the stage');
     return p;
   }
-  loadProject(p, quiet) {
-    try { validateProject(p); p = this.normalize(clone(p)); } catch (e) { this.toast('Could not load: ' + e.message); return false; }
+  /** cloudRef: only pass { id, name, user } when loading the signed-in user's own cloud project. Anything else unlinks. */
+  loadProject(p, quiet, cloudRef = null) {
+    try { validateProject(p); p = this.normalize(clone(p)); } catch (e) { this.toast('Can’t open this project: ' + e.message); return false; }
+    this.setCloudRef(cloudRef);
     if (this._project) this.runtime.stopAll(); this._project = p; this.runtime.stopAll(); this.runtime.penCtx.clearRect(0, 0, W, H); this.runtime.normalizeLayers();
     for (const t of p.targets) for (const c of t.costumes) getImg(c.src, () => { this.runtime.redraw = true; this.renderTargets(); });
     this.target = p.targets[1] || p.targets[0]; this.clearConsole();
@@ -56,7 +68,7 @@ class App {
   }
   serialize() {
     const skip = new Set(['bubble', 'base', 'isClone', 'penDown', 'effects']);
-    return JSON.stringify({ ...this.project, format: 'blockforge', version: 1 }, (k, v) => (skip.has(k) ? undefined : v));
+    return JSON.stringify({ ...this.project, format: 'kindlr', version: 1 }, (k, v) => (skip.has(k) ? undefined : v));
   }
   changed(structural = true) {
     this.dirty = true; clearTimeout(this._saveT); this._saveT = setTimeout(() => this.autosave(), 800);
@@ -109,7 +121,7 @@ class App {
   }
   menuOptions(menu, t, cur, block) {
     const sprites = this.project.targets.filter(x => !x.isStage).map(x => x.name);
-    const others = sprites.filter(n => n !== t.name); const sp = v => [SPECIAL[v] || v, v];
+    const others = sprites.filter(n => n !== t.name); const sp = v => [get(SPECIAL, v) || v, v];
     let o;
     switch (menu) {
       case 'goto': o = ['_random_', '_mouse_', ...others].map(sp); break;
@@ -144,15 +156,17 @@ class App {
     const isList = kind === 'list', key = isList ? 'lists' : 'variables';
     const res = await this.form(isList ? 'New list' : 'New variable', [{ name: 'name', label: 'Name', value: '' }, ...(this.target.isStage ? [] : [{ name: 'scope', type: 'radio', options: [['all', 'For all sprites'], ['local', 'For this sprite only']], value: 'all' }])]);
     if (!res || !res.name.trim()) return; const name = res.name.trim();
+    if (RESERVED_NAMES.has(name) || name.length > LIMITS.maxNameLength) { this.toast('That name is reserved or too long'); return; }
     if (this.visibleVars(this.target, key).includes(name)) { this.toast('That name is already used'); return; }
     const host = res.scope === 'local' ? this.target : this.project.targets[0];
-    host[key][name] = isList ? [] : 0;
+    put(host[key], name, isList ? [] : 0);
     this.setMonitor(isList ? 'list' : 'var', name, this.target, true);
     this.changed(true);
   }
   async renameVariable(key, old) {
     const n = (await this.prompt('Rename to:', old))?.trim(); if (!n || n === old) return;
-    for (const t of this.project.targets) if (old in t[key]) { t[key][n] = t[key][old]; delete t[key][old]; }
+    if (RESERVED_NAMES.has(n) || n.length > LIMITS.maxNameLength) { this.toast('That name is reserved or too long'); return; }
+    for (const t of this.project.targets) if (has(t[key], old)) { put(t[key], n, t[key][old]); delete t[key][old]; }
     const rop = key === 'lists' ? 'list' : 'var', menu = key === 'lists' ? 'list' : 'var';
     this.walkBlocks(b => {
       if (b.op === rop && b.args[0] === old) b.args[0] = n;
@@ -162,7 +176,7 @@ class App {
     this.refresh(); this.changed(true);
   }
   deleteVariable(key, name) {
-    for (const t of this.project.targets) delete t[key][name];
+    for (const t of this.project.targets) if (has(t[key], name)) delete t[key][name];
     this.project.monitors = this.project.monitors.filter(m => !(m.name === name && m.type === (key === 'lists' ? 'list' : 'var')));
     this.refresh(); this.changed(true); this.toast(`Deleted “${name}”`);
   }
@@ -256,12 +270,19 @@ class App {
   }
   toggleFull(on = !document.body.classList.contains('fullstage')) { document.body.classList.toggle('fullstage', on); this.resizeStage(); }
   showAsk(q, cb) { $('ask').hidden = false; $('ask-q').textContent = q; $('ask-input').value = ''; this._askCb = cb; setTimeout(() => $('ask-input').focus(), 0); }
+  withPaint(fn) {
+    if (this.paint) return fn(this.paint);
+    this._paintP ||= lazyPaint().then(m => (this.paint = new m.Paint(this)));
+    return this._paintP.then(fn);
+  }
   hideAsk() { $('ask').hidden = true; this._askCb = null; }
   frame() {
     try {
       this.runtime.step();
-      const s = this.stageScale * (window.devicePixelRatio || 1); this.ctx.setTransform(s, 0, 0, s, 0, 0); this.ctx.imageSmoothingEnabled = true;
-      this.runtime.render(this.ctx);
+      if (this.runtime.needsRender()) {      // repaint only when something visual changed
+        const s = this.stageScale * (window.devicePixelRatio || 1); this.ctx.setTransform(s, 0, 0, s, 0, 0); this.ctx.imageSmoothingEnabled = true;
+        this.runtime.render(this.ctx);
+      }
       this.renderMonitors(false); syncWidgets($('widgets'), this.runtime);
       const running = this.runtime.isRunning(); $('btn-ignite').classList.toggle('active', running);
       this.blocks.updateRunning(this.runningScripts());
@@ -338,7 +359,7 @@ class App {
     const row = h('div', 'actions'); row.style.justifyContent = 'flex-start'; row.style.marginTop = '0';
     const paint = h('button', '', '🖌 Paint a new sprite'); paint.onclick = () => { close(); this.addSprite('Sprite', [{ name: 'costume1', src: art.svgUrl(2, 2, ''), w: 1, h: 1, cx: 0.5, cy: 0.5 }]); this.switchTab('costumes'); };
     const up = h('button', '', '⤒ Upload image'); up.onclick = () => { close(); this.uploadImage(c => this.addSprite(c.name, [c])); };
-    row.append(paint, up); box.appendChild(row); box.appendChild(h('p', 'hint', 'Or pick an original Blockforge character:'));
+    row.append(paint, up); box.appendChild(row); box.appendChild(h('p', 'hint', 'Or pick an original Kindlr character:'));
     const grid = h('div', 'lib-grid');
     for (const it of art.SPRITE_LIBRARY) { const d = h('div', 'lib-item'); const im = h('img'); im.src = it.costumes[0].src; d.append(im, h('div', '', it.name)); d.onclick = () => { close(); this.addSprite(it.name, it.costumes); }; grid.appendChild(d); }
     box.appendChild(grid);
@@ -379,14 +400,14 @@ class App {
       tile.append(dup, x); tile.onclick = e => { if (e.target === nm) return; t.costume = i; this.runtime.redraw = true; this.renderCostumes(); this.renderTargets(); };
       box.appendChild(tile);
     });
-    this.paint.load(t.costumes[t.costume]);
+    this.withPaint(p => p.load(t.costumes[t.costume]));
   }
   costumesChanged() {
     this.runtime.redraw = true; const t = this.target; const tiles = $('costume-tiles').querySelectorAll('.ctile img');
     const c = t.costumes[t.costume]; if (tiles[t.costume] && c) tiles[t.costume].src = c.src; this.renderTargets(); this.changed(false);
   }
 
-  // ------------------------------------------------ text (Ember)
+  // ------------------------------------------------ text (Kindlr Script)
   initText() {
     const ta = $('code'), hl = $('code-hl');
     const sync = () => { hl.innerHTML = highlight(ta.value) + '\n'; hl.scrollTop = ta.scrollTop; hl.scrollLeft = ta.scrollLeft; };
@@ -404,13 +425,13 @@ class App {
   textFromBlocks() { $('code').value = targetToText(this.target); this._syncText(); this._textDirty = false; $('text-status').textContent = 'In sync with blocks'; $('text-status').className = 'ok'; }
   textToBlocks() {
     try {
-      const scripts = parseEmber($('code').value);
+      const scripts = parseKls($('code').value);
       const defs = new Set(scripts.map(s => s.blocks[0]).filter(b => b?.op === 'define').map(b => b.name));
       // auto-create any variables/lists referenced in text
       const visit = b => { if (!b || typeof b !== 'object' || !b.op) return;
-        const d = DEFS[b.op]; if (b.op === 'var' && !this.visibleVars(this.target, 'variables').includes(b.args[0])) this.project.targets[0].variables[b.args[0]] = 0;
-        if (b.op === 'list' && !this.visibleVars(this.target, 'lists').includes(b.args[0])) this.project.targets[0].lists[b.args[0]] = [];
-        if (d) { let i = 0; for (const m of d.text.matchAll(/%(n|s|b|k|v|m\.(\w+))/g)) { const v = b.args[i]; if (typeof v === 'string' && v) { if (m[2] === 'var' && !this.visibleVars(this.target, 'variables').includes(v)) this.project.targets[0].variables[v] = 0; if (m[2] === 'list' && !this.visibleVars(this.target, 'lists').includes(v)) this.project.targets[0].lists[v] = []; } i++; } }
+        const d = DEFS[b.op]; if (b.op === 'var' && !this.visibleVars(this.target, 'variables').includes(b.args[0])) put(this.project.targets[0].variables, b.args[0], 0);
+        if (b.op === 'list' && !this.visibleVars(this.target, 'lists').includes(b.args[0])) put(this.project.targets[0].lists, b.args[0], []);
+        if (d) { let i = 0; for (const m of d.text.matchAll(/%(n|s|b|k|v|m\.(\w+))/g)) { const v = b.args[i]; if (typeof v === 'string' && v) { if (m[2] === 'var' && !this.visibleVars(this.target, 'variables').includes(v)) put(this.project.targets[0].variables, v, 0); if (m[2] === 'list' && !this.visibleVars(this.target, 'lists').includes(v)) put(this.project.targets[0].lists, v, []); } i++; } }
         if (b.op === 'call' && !defs.has(b.name)) throw new Error(`unknown block '${b.name}' (define it with define ${b.name}(...) { })`);
         (b.args || []).forEach(visit); (b.body || []).forEach(visit); (b.body2 || []).forEach(visit); };
       scripts.forEach(s => s.blocks.forEach(visit));
@@ -429,9 +450,12 @@ class App {
 
   // ------------------------------------------------ chrome
   initChrome() {
-    const theme = localStorage.getItem('blockforge.theme') || 'dark'; document.documentElement.dataset.theme = theme;
+    const theme = localStorage.getItem('kindlr.theme') || 'dark'; document.documentElement.dataset.theme = theme;
     $('logo').innerHTML = art.LOGO_SVG; $('ignite-icon').innerHTML = art.FLAME_SVG;
-    $('btn-theme').onclick = () => { const t = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'; document.documentElement.dataset.theme = t; localStorage.setItem('blockforge.theme', t); };
+    document.querySelectorAll('[data-icon]').forEach(el => iconize(el, el.dataset.icon, el.textContent.trim() || null));
+    $('btn-examples').insertAdjacentHTML('beforeend', ICONS.caret);
+    this.initMobileNotice();
+    $('btn-theme').onclick = () => { const t = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'; document.documentElement.dataset.theme = t; localStorage.setItem('kindlr.theme', t); };
     const cats = $('cats');
     for (const c of CATEGORIES) { const b = h('button', 'cat'); b.style.setProperty('--c', c.color); b.append(h('i'), h('span', '', c.name)); b.onclick = () => { const el = $('pal-' + c.id); if (el) $('palette').scrollTo({ top: el.offsetTop - 6, behavior: 'smooth' }); }; cats.appendChild(b); }
     $('palette').addEventListener('scroll', () => { const P = $('palette'); let cur = CATEGORIES[0].id; for (const c of CATEGORIES) { const el = $('pal-' + c.id); if (el && el.offsetTop - 30 <= P.scrollTop) cur = c.id; } cats.querySelectorAll('.cat').forEach((b, i) => b.classList.toggle('on', CATEGORIES[i].id === cur)); });
@@ -445,58 +469,296 @@ class App {
     $('btn-new').onclick = async () => { if (await this.confirm('Start a new project? Unsaved changes will be lost (download a copy with Save first).')) this.loadProject(blankProject()); };
     $('btn-save').onclick = () => this.download();
     $('btn-open').onclick = () => { const f = $('file-input'); f.value = ''; f.click(); };
-    $('file-input').onchange = e => { const f = e.target.files[0]; if (!f) return; f.text().then(t => { try { this.loadProject(validateProject(t)); } catch (err) { this.toast('Cannot open: ' + err.message); } }); };
+    $('file-input').onchange = e => { const f = e.target.files[0]; if (!f) return; this.openFile(f); };
+    $('text-open').onclick = () => { const f = $('file-input'); f.value = ''; f.accept = '.kls,text/plain'; f.click(); setTimeout(() => (f.accept = '.kindlr,.kls,.json,application/json'), 0); };
+    $('text-download').onclick = () => this.saveFile(new Blob([$('code').value], { type: 'text/plain' }), this.fileBase() + '-' + this.target.name.replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-') + '.kls', 'Kindlr Script downloaded');
     const dd = $('btn-examples').parentNode, menu = $('examples-menu');
     const blurbs = ['Meet Sparky & Bolt: events, broadcasts, sounds, effects', 'A mini game: clones, keys, score & lives', 'Pen art with a custom block and a list', 'Program mode: widgets, console, maps, storage', 'Gravity, velocity & the draw event'];
     exampleProjects().forEach((p, i) => { const b = h('button'); b.append(h('b', '', p.name), h('small', '', blurbs[i])); b.onclick = () => { dd.classList.remove('open'); this.loadProject(exampleProjects()[i]); }; menu.appendChild(b); });
-    $('btn-examples').onclick = e => { e.stopPropagation(); dd.classList.toggle('open'); };
-    document.addEventListener('click', () => dd.classList.remove('open'));
+    const setDD = open => { dd.classList.toggle('open', open); $('btn-examples').setAttribute('aria-expanded', String(open)); if (open) menu.querySelector('button')?.focus(); };
+    menu.querySelectorAll('button').forEach(b => b.setAttribute('role', 'menuitem'));
+    $('btn-examples').onclick = e => { e.stopPropagation(); setDD(!dd.classList.contains('open')); };
+    menu.addEventListener('keydown', e => {
+      const items = [...menu.querySelectorAll('button')]; const i = items.indexOf(document.activeElement);
+      if (e.key === 'Escape') { setDD(false); $('btn-examples').focus(); }
+      if (e.key === 'ArrowDown') { e.preventDefault(); items[(i + 1) % items.length].focus(); }
+      if (e.key === 'ArrowUp') { e.preventDefault(); items[(i - 1 + items.length) % items.length].focus(); }
+    });
+    document.addEventListener('click', () => setDD(false));
     $('btn-account').onclick = () => this.accountDialog();
     $('btn-cloud').onclick = () => this.cloudDialog();
+    $('btn-share').onclick = () => this.shareDialog();
     $('btn-player').onclick = () => openPlayer(this, this.serialize(), { title: 'Sandboxed player — ' + this.project.name, onStore: (k, v) => this.storeSet(k, v) });
     $('con-clear').onclick = () => this.clearConsole(); $('con-toggle').onclick = () => $('console').classList.toggle('collapsed');
     window.addEventListener('beforeunload', () => { if (this.dirty) this.autosave(); });
   }
-  download() {
-    const blob = new Blob([this.serialize()], { type: 'application/json' }); const a = h('a');
-    a.href = URL.createObjectURL(blob); a.download = (this.project.name || 'project').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-') + '.bforge.json';
-    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); this.toast('Project downloaded');
+  // Phones: the editor needs a big screen. Offer the sandboxed player (works well on phones) or continue anyway.
+  initMobileNotice() {
+    const small = () => window.matchMedia('(max-width: 760px)').matches;
+    if (small()) { document.documentElement.classList.add('small-screen'); document.body.classList.add('small-screen'); }   // editor on a phone: desktop layout, pannable (see style.css)
+    if (!small() || localStorage.getItem('kindlr.mobile-ok') === '1') return;
+    const box = h('div'); box.id = 'mobile-notice'; box.setAttribute('role', 'dialog'); box.setAttribute('aria-modal', 'true'); box.setAttribute('aria-labelledby', 'mn-title');
+    const card = h('div', 'mn-card'); const logo = h('div', 'mn-logo'); logo.innerHTML = art.LOGO_SVG;
+    const play = h('button', 'primary', 'Play this project'); const ex = h('a', 'btn', 'Explore shared projects'); ex.href = './explore';
+    const go = h('button', 'link', 'Open the editor anyway');
+    card.append(logo, Object.assign(h('h2', '', 'Kindlr works best on a bigger screen'), { id: 'mn-title' }),
+      h('p', '', 'Building with blocks needs room to drag. On a phone you can still play projects in the sandboxed player, or browse what others made.'), play, ex, go);
+    box.appendChild(card); document.body.appendChild(box);
+    const close = () => box.remove();
+    play.onclick = () => { close(); openPlayer(this, this.serialize(), { title: this.project.name }); };
+    go.onclick = () => { localStorage.setItem('kindlr.mobile-ok', '1'); close(); };
+    setTimeout(() => play.focus(), 50);
+  }
+  fileBase() { return (this.project.name || 'project').replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-') || 'project'; }
+  saveFile(blob, name, msg) { const a = h('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); this.toast(msg); }
+  download() { this.saveFile(new Blob([this.serialize()], { type: 'application/json' }), this.fileBase() + '.kindlr', 'Project downloaded as ' + this.fileBase() + '.kindlr'); }
+  /** .kindlr / old .bforge.json / .json → project; .kls → Kindlr Script text for the current sprite. */
+  async openFile(f) {
+    if (f.size > LIMITS.maxJsonBytes) { this.toast(`That file is too big (max ${LIMITS.maxJsonBytes / 1e6} MB)`); return; }
+    const t = await f.text();
+    if (/\.kls$/i.test(f.name)) {
+      if (t.length > LIMITS.maxTextBytes) { this.toast('That script is too big (max 1 MB)'); return; }
+      this.switchTab('text'); $('code').value = t; this._syncText(); this._textDirty = true;
+      $('text-status').textContent = `Loaded ${f.name}. Press “Apply to blocks” to use it for ${this.target.name}`; $('text-status').className = ''; return;
+    }
+    try { this.loadProject(validateProject(t)); } catch (err) { this.toast('Can’t open this file: ' + err.message); }
   }
 
   // ------------------------------------------------ cloud (optional server)
-  setUser(u) { this.user = u; if (u) localStorage.setItem('blockforge.cloud', '1'); else localStorage.removeItem('blockforge.cloud'); $('btn-account').textContent = u ? '👤 ' + u.username : 'Sign in'; }
-  accountDialog() {
-    if (this.user) { const { box, close } = this.modal('Account'); box.appendChild(h('p', '', `Signed in as ${this.user.username}.`)); const a = h('div', 'actions'); const lo = h('button', '', 'Log out'); lo.onclick = async () => { await cloud.logout().catch(() => {}); this.setUser(null); close(); this.toast('Logged out'); }; a.appendChild(lo); box.appendChild(a); return; }
-    const { box, close } = this.modal('Sign in to Blockforge Cloud');
-    const u = h('input'); u.type = 'text'; u.placeholder = 'username'; u.autocomplete = 'username'; const p = h('input'); p.type = 'password'; p.placeholder = 'password (8+ characters)'; p.autocomplete = 'current-password';
-    const err = h('div', 'err-text'); box.append(h('label', '', 'Username'), u, h('label', '', 'Password'), p, err);
-    const act = h('div', 'actions'); const su = h('button', '', 'Create account'); const li = h('button', 'primary', 'Log in');
-    const go = async fn => { err.textContent = ''; try { const user = await fn(u.value.trim(), p.value); this.setUser(user); close(); this.toast('Welcome, ' + user.username + '!'); } catch (e) { err.textContent = e.message; } };
-    su.onclick = () => go(cloud.signup); li.onclick = () => go(cloud.login); p.onkeydown = e => { if (e.key === 'Enter') li.click(); };
-    act.append(su, li); box.appendChild(act); setTimeout(() => u.focus(), 0);
+  // cloudRef = { id, name, user } of the cloud project the editor is *currently* showing, or null.
+  // It is cleared by every load that isn't "open my own cloud project" (New, Open file, examples, See inside,
+  // shared/remix views), so Save can never overwrite an unrelated cloud project or its public share.
+  setCloudRef(ref) {
+    this.cloudRef = ref && typeof ref.id === 'string' ? { id: ref.id, name: String(ref.name || ''), user: String(ref.user || '') } : null;
+    try { if (this.cloudRef) localStorage.setItem(CLOUDREF, JSON.stringify(this.cloudRef)); else localStorage.removeItem(CLOUDREF); } catch (e) { }
+    $('save-status').title = this.cloudRef ? `Linked to cloud project “${this.cloudRef.name}”` : 'Not linked to a cloud project';
+  }
+  readCloudRef() { try { const r = JSON.parse(localStorage.getItem(CLOUDREF) || 'null'); return r && typeof r.id === 'string' ? r : null; } catch (e) { return null; } }
+  setUser(u) {
+    this.user = u; if (u) localStorage.setItem('kindlr.cloud', '1'); else localStorage.removeItem('kindlr.cloud');
+    const b = $('btn-account'); iconize(b, u ? (u.email_verified ? 'user' : 'warn') : 'user', u ? u.username : 'Sign in');
+    b.dataset.state = u ? (u.email_verified ? 'verified' : 'unverified') : 'signed-out';
+    b.title = u ? (u.email_verified ? `Signed in as ${u.username}. Account settings` : 'Your email is not verified yet. Open your account to resend the link') : 'Sign in or create an account';
+    if (this.cloudRef && (!u || this.cloudRef.user !== u.username)) this.setCloudRef(null);   // never save into another account's project
+  }
+  async openFromHash() {
+    const m = location.hash.match(/(?:^#|&)cloud=([\w-]{8,32})/); if (!m) return;
+    history.replaceState(null, '', location.pathname + location.search);
+    try { const u = await cloud.me(); this.setUser(u); if (!u) { this.toast('Sign in to open that project'); return; } await this.openCloudProject(m[1]); }
+    catch (e) { this.toast('Could not open cloud project: ' + e.message); }
+  }
+  async openCloudProject(id) {
+    const r = await cloud.meta(id); const p = validateProject(r.data);
+    if (this.loadProject(p, false, { id, name: r.name, user: this.user.username })) { if (p.name !== r.name) { this.project.name = r.name; $('project-name').value = r.name; } return true; }
+    return false;
+  }
+  /** Save to the cloud. Overwrites only the linked project of the signed-in user, after confirming any doubt. */
+  async saveToCloud({ asNew = false } = {}) {
+    if (!this.user) { this.accountDialog('Sign in to save to the cloud'); return null; }
+    const name = this.project.name, data = this.serialize();
+    let ref = asNew ? null : this.cloudRef;
+    if (ref && ref.user !== this.user.username) ref = null;
+    if (ref && ref.name !== name) {
+      const c = await this.choose('Overwrite cloud project?', `The editor is linked to your cloud project “${ref.name}”, but this project is called “${name}”. Overwrite “${ref.name}” (including its public link, if shared), or save a new copy?`,
+        [['cancel', 'Cancel'], ['new', 'Save as new'], ['over', `Overwrite “${ref.name}”`, 'danger']]);
+      if (c === 'cancel' || !c) return null; if (c === 'new') ref = null;
+    }
+    try {
+      const r = await cloud.save(ref ? ref.id : null, name, data);
+      this.setCloudRef({ id: r.id, name, user: this.user.username }); this.toast(ref ? 'Saved to cloud' : 'Saved as a new cloud project'); return r.id;
+    } catch (e) {
+      if (ref && e.status === 404) {   // deleted elsewhere or not ours: never guess; offer a fresh copy
+        this.setCloudRef(null);
+        if (await this.confirm('That cloud project no longer exists in your account. Save this as a new cloud project instead?')) return this.saveToCloud({ asNew: true });
+        return null;
+      }
+      this.toast('Save failed: ' + e.message); return null;
+    }
+  }
+  accountDialog(note) {
+    if (this.user) return this.accountSettings();
+    const { box, close } = this.modal('Kindlr Cloud'); box.classList.add('auth-modal');
+    if (note) box.appendChild(h('p', 'hint', note));
+    const tabs = h('div', 'auth-tabs'); const tLogin = h('button', 'on', 'Log in'), tSign = h('button', '', 'Create account'); tabs.append(tLogin, tSign);
+    const u = h('input'); u.type = 'text'; u.placeholder = 'username'; u.autocomplete = 'username'; u.maxLength = 24;
+    const em = h('input'); em.type = 'email'; em.placeholder = 'you@example.com'; em.autocomplete = 'email'; em.maxLength = 254;
+    const p = h('input'); p.type = 'password'; p.placeholder = 'at least 8 characters'; p.autocomplete = 'current-password'; p.maxLength = 200;
+    const emLab = h('label', '', 'Email (for verification and password reset)');
+    const err = h('div', 'err-text');
+    box.append(tabs, h('label', '', 'Username'), u, emLab, em, h('label', '', 'Password'), p, err);
+    const act = h('div', 'actions'); const forgot = h('button', 'link', 'Forgot password?'); const go = h('button', 'primary', 'Log in'); act.append(forgot, go); box.appendChild(act);
+    let mode = 'login';
+    const setMode = m => { mode = m; tLogin.className = m === 'login' ? 'on' : ''; tSign.className = m === 'signup' ? 'on' : ''; emLab.hidden = em.hidden = m !== 'signup'; go.textContent = m === 'login' ? 'Log in' : 'Create account'; p.autocomplete = m === 'login' ? 'current-password' : 'new-password'; err.textContent = ''; };
+    tLogin.onclick = () => setMode('login'); tSign.onclick = () => setMode('signup'); setMode('login');
+    go.onclick = async () => {
+      err.textContent = ''; go.disabled = true;
+      try {
+        const user = mode === 'login' ? await cloud.login(u.value.trim(), p.value) : await cloud.signup(u.value.trim(), em.value.trim(), p.value);
+        this.setUser(user); close();
+        this.toast(mode === 'signup' ? `Welcome, ${user.username}! Check ${user.email} for a link to verify your email.` : 'Welcome back, ' + user.username + '!');
+      } catch (e) { err.textContent = e.message; } finally { go.disabled = false; }
+    };
+    p.onkeydown = e => { if (e.key === 'Enter') go.click(); };
+    forgot.onclick = () => { close(); this.forgotDialog(u.value.includes('@') ? u.value : ''); };
+    setTimeout(() => u.focus(), 0);
+  }
+  forgotDialog(prefill = '') {
+    const { box, close } = this.modal('Reset your password');
+    box.appendChild(h('p', 'hint', 'Enter the email address on your account. If it matches an account, we will send a link to choose a new password (valid for 1 hour).'));
+    const em = h('input'); em.type = 'email'; em.value = prefill; em.placeholder = 'you@example.com'; em.autocomplete = 'email';
+    const msg = h('div', 'hint'); const err = h('div', 'err-text'); box.append(h('label', '', 'Email'), em, err, msg);
+    const act = h('div', 'actions'); const c = h('button', '', 'Close'), s = h('button', 'primary', 'Send reset link'); act.append(c, s); box.appendChild(act);
+    c.onclick = close;
+    s.onclick = async () => { err.textContent = ''; s.disabled = true; try { const r = await cloud.forgot(em.value.trim()); msg.textContent = r.message; s.textContent = 'Sent'; } catch (e) { err.textContent = e.message; s.disabled = false; } };
+    em.onkeydown = e => { if (e.key === 'Enter') s.click(); }; setTimeout(() => em.focus(), 0);
+  }
+  async accountSettings() {
+    try { const fresh = await cloud.me(); this.setUser(fresh); if (!fresh) return this.accountDialog('Your session ended. Please sign in again.'); } catch (e) { }
+    const user = this.user;
+    const { box, close } = this.modal('Account'); box.classList.add('account-modal');
+    const section = (title, cls = '') => { const s = h('section', 'acct ' + cls); s.appendChild(h('h4', '', title)); box.appendChild(s); return s; };
+    const row = (...els) => { const r = h('div', 'row'); r.append(...els); return r; };
+    const input = (type, ph, ac) => { const i = h('input'); i.type = type; i.placeholder = ph; if (ac) i.autocomplete = ac; i.maxLength = type === 'email' ? 254 : 200; return i; };
+    // profile + verification
+    const prof = section('Profile');
+    prof.appendChild(row(h('b', '', user.username), h('span', 'muted', user.email || 'no email on file'),
+      h('span', 'badge ' + (user.email_verified ? 'ok' : 'warn'), user.email_verified ? 'Verified' : 'Not verified')));
+    if (!user.email_verified) {
+      const note = h('p', 'hint', 'You can sign in, use the editor and save private projects. Verify your email to publish/share projects and create API tokens.');
+      const resend = h('button', '', 'Resend verification email'); const rmsg = h('span', 'hint');
+      resend.onclick = async () => { resend.disabled = true; try { const r = await cloud.resendVerification(); rmsg.textContent = r.already_verified ? 'Already verified.' : `Sent to ${user.email}. ${r.remaining} resend${r.remaining === 1 ? '' : 's'} left this hour.`; } catch (e) { rmsg.textContent = e.message; } finally { setTimeout(() => (resend.disabled = false), 4000); } };
+      prof.append(note, row(resend, rmsg));
+    }
+    // change password
+    const pw = section('Change password');
+    const cur = input('password', 'current password', 'current-password'), nw = input('password', 'new password (8+ characters)', 'new-password'); const pmsg = h('div', 'hint');
+    const pbtn = h('button', '', 'Change password');
+    pbtn.onclick = async () => { pmsg.textContent = ''; try { await cloud.changePassword(cur.value, nw.value); cur.value = nw.value = ''; pmsg.textContent = 'Password changed. Other devices were signed out.'; } catch (e) { pmsg.textContent = e.message; } };
+    pw.append(cur, nw, row(pbtn, pmsg));
+    // change email
+    const ce = section('Change email');
+    const ne = input('email', 'new email address', 'email'), cep = input('password', 'current password', 'current-password'); const emsg = h('div', 'hint');
+    const ebtn = h('button', '', 'Change email');
+    ebtn.onclick = async () => { emsg.textContent = ''; try { const u2 = await cloud.changeEmail(ne.value.trim(), cep.value); this.setUser(u2); emsg.textContent = `Saved. We sent a verification link to ${u2.email}; publishing is paused until you verify it.`; ne.value = cep.value = ''; } catch (e) { emsg.textContent = e.message; } };
+    ce.append(ne, cep, row(ebtn, emsg));
+    // API tokens
+    const tk = section('API tokens');
+    tk.appendChild(h('p', 'hint', 'Tokens let scripts read and write your projects via /api/projects with "Authorization: Bearer <token>". They are shown once and stored hashed.'));
+    const tlist = h('div', 'token-list'); const tname = input('text', 'token name, e.g. backup script'); tname.maxLength = 60; const tmsg = h('div', 'hint');
+    const tbtn = h('button', '', 'Create token'); tbtn.disabled = !user.email_verified; if (!user.email_verified) tbtn.title = 'Verify your email first';
+    const loadTokens = async () => { tlist.replaceChildren(h('div', 'loading', 'Loading tokens…')); try { const ts = await cloud.tokens(); tlist.replaceChildren(); if (!ts.length) tlist.appendChild(h('div', 'muted', 'No tokens yet.')); for (const t of ts) { const del = h('button', 'small', 'Revoke'); del.onclick = async () => { if (await this.confirm(`Revoke token “${t.name}”? Scripts using it will stop working.`)) { await cloud.deleteToken(t.id); loadTokens(); } }; tlist.appendChild(row(h('b', '', t.name), h('span', 'muted', 'created ' + new Date(t.created_at).toLocaleDateString() + (t.last_used_at ? ' · used ' + new Date(t.last_used_at).toLocaleDateString() : ' · never used')), del)); } } catch (e) { tlist.appendChild(h('div', 'err-text', e.message)); } };
+    tbtn.onclick = async () => { tmsg.replaceChildren(); try { const r = await cloud.createToken(tname.value.trim()); tname.value = ''; const out = h('input'); out.readOnly = true; out.value = r.token; out.className = 'mono'; const cp = h('button', 'small', 'Copy'); cp.onclick = () => this.copy(r.token, 'Token copied'); tmsg.append(h('div', '', 'Copy your new token now. It will not be shown again:'), row(out, cp)); loadTokens(); } catch (e) { tmsg.textContent = e.message; } };
+    tk.append(tlist, row(tname, tbtn), tmsg); loadTokens();
+    // danger zone
+    const dz = section('Delete account', 'danger');
+    dz.appendChild(h('p', 'hint', 'Permanently deletes your account, all cloud projects and their public links, and API tokens. This cannot be undone.'));
+    const dconf = input('text', `type your username (${user.username}) to confirm`), dpw = input('password', 'current password', 'current-password'); const dmsg = h('div', 'err-text');
+    const dbtn = h('button', 'danger', 'Delete my account');
+    dbtn.onclick = async () => { dmsg.textContent = ''; try { await cloud.deleteAccount(dpw.value, dconf.value.trim()); this.setUser(null); this.setCloudRef(null); close(); this.toast('Your account was deleted'); } catch (e) { dmsg.textContent = e.message; } };
+    dz.append(dconf, dpw, row(dbtn), dmsg);
+    const act = h('div', 'actions'); const lo = h('button', '', 'Log out'), cl = h('button', 'primary', 'Done');
+    lo.onclick = async () => { await cloud.logout().catch(() => {}); this.setUser(null); close(); this.toast('Logged out'); }; cl.onclick = close;
+    act.append(lo, cl); box.appendChild(act);
   }
   async cloudDialog() {
-    if (!this.user) { this.accountDialog(); return; }
+    if (!this.user) { this.accountDialog('Sign in to save projects to the cloud'); return; }
     const { box, close } = this.modal('Cloud projects'); const list = h('div', 'cloud-list'); const err = h('div', 'err-text');
-    const save = h('button', 'primary', this.cloudId ? 'Save (update cloud copy)' : 'Save current project to cloud');
-    save.onclick = async () => { try { const r = await cloud.save(this.cloudId, this.project.name, this.serialize()); this.cloudId = r.id; this.toast('Saved to cloud'); load(); } catch (e) { err.textContent = e.message; } };
-    box.append(save, err, list);
+    const linked = this.cloudRef ? `Linked to “${this.cloudRef.name}”` : 'This project is not saved to the cloud yet';
+    box.appendChild(h('p', 'hint', linked));
+    const bar = h('div', 'row');
+    const save = h('button', 'primary', this.cloudRef ? 'Save' : 'Save to cloud'); const saveNew = h('button', '', 'Save as new');
+    save.onclick = async () => { if (await this.saveToCloud()) { close(); this.cloudDialog(); } };
+    saveNew.onclick = async () => { if (await this.saveToCloud({ asNew: true })) { close(); this.cloudDialog(); } };
+    bar.append(save, saveNew); box.append(bar, err, list);
     const load = async () => {
-      list.innerHTML = '';
+      list.replaceChildren(h('div', 'loading', 'Loading your projects…'));
       try {
-        const items = await cloud.list(); if (!items.length) list.appendChild(h('div', 'pal-note', 'No cloud projects yet.'));
+        const items = await cloud.list(); list.replaceChildren();
+        if (!items.length) { const e = h('div', 'empty'); e.append(h('b', '', 'No cloud projects yet'), 'Press “Save to cloud” to keep this project in your account and open it on any computer.'); list.appendChild(e); }
         for (const it of items) {
-          const row = h('div', 'cloud-row'); const t = h('div', 't'); t.append(h('b', '', it.name), h('br'), h('small', '', new Date(it.updated_at).toLocaleString() + (it.is_public ? ' · shared' : '')));
-          const open = h('button', '', 'Open'); open.onclick = async () => { const p = validateProject(await cloud.get(it.id)); if (this.loadProject(p)) { this.cloudId = it.id; close(); } };
-          const share = h('button', '', it.is_public ? 'Unshare' : 'Share'); share.onclick = async () => { const r = await cloud.share(it.id, !it.is_public); if (r.is_public) { const url = location.origin + location.pathname + '#share=' + it.id; navigator.clipboard?.writeText(url).catch(() => {}); this.toast('Share link copied: ' + url); } load(); };
-          const del = h('button', '', '🗑'); del.onclick = async () => { if (await this.confirm(`Delete “${it.name}” from the cloud?`)) { await cloud.remove(it.id); if (this.cloudId === it.id) this.cloudId = null; load(); } };
-          row.append(t, open, share, del); list.appendChild(row);
+          const row = h('div', 'cloud-row' + (this.cloudRef?.id === it.id ? ' current' : '')); const t = h('div', 't');
+          t.append(h('b', '', it.name), h('br'), h('small', '', new Date(it.updated_at).toLocaleString() + (it.is_public ? ' · public' : '') + (this.cloudRef?.id === it.id ? ' · open now' : '')));
+          const open = h('button', '', 'Open'); open.onclick = async () => { try { if (await this.openCloudProject(it.id)) close(); } catch (e) { err.textContent = e.message; } };
+          const del = h('button', '', '🗑'); del.title = 'Delete'; del.onclick = async () => { if (await this.confirm(`Delete “${it.name}” from the cloud? Its public link (if any) stops working.`)) { await cloud.remove(it.id); if (this.cloudRef?.id === it.id) this.setCloudRef(null); load(); } };
+          row.append(t, open, del); list.appendChild(row);
         }
-      } catch (e) { err.textContent = e.message; }
+      } catch (e) { list.replaceChildren(); err.textContent = 'Couldn’t load your projects: ' + e.message; }
     };
     load();
   }
-  async loadShared(id) { try { const p = validateProject(await cloud.sharedRaw(id)); const json = JSON.stringify(p); openPlayer(this, json, { title: 'Shared project: ' + (p.name || ''), onSeeInside: () => this.loadProject(p) }); } catch (e) { this.toast('Could not open shared project: ' + e.message); } }
+  // ---- Share: two-step "Make public", then link / embed / QR / unshare
+  async shareDialog() {
+    if (!this.user) { try { this.setUser(await cloud.me()); } catch (e) { this.toast(e.message); return; } }
+    if (!this.user) { this.accountDialog('Sign in to share your project'); return; }
+    const { box, close } = this.modal('Share “' + this.project.name + '”'); box.classList.add('share-modal');
+    const body = h('div'); box.appendChild(body);
+    const footer = h('div', 'actions'); const done = h('button', '', 'Close'); done.onclick = close; footer.appendChild(done); box.appendChild(footer);
+    const show = (...els) => body.replaceChildren(...els);
+    const user = this.user;
+    if (!user.email_verified) {
+      const resend = h('button', '', 'Resend verification email'); const m = h('div', 'hint');
+      resend.onclick = async () => { resend.disabled = true; try { const r = await cloud.resendVerification(); m.textContent = r.already_verified ? 'Already verified. Reopen this dialog.' : `Sent to ${user.email}.`; } catch (e) { m.textContent = e.message; } };
+      const save = h('button', 'primary', 'Save privately to cloud'); save.onclick = async () => { if (await this.saveToCloud()) close(); };
+      show(h('p', '', 'Verify your email address before publishing. Check your inbox for the link we sent to ' + (user.email || 'your address') + '.'), h('p', 'hint', 'Until then you can still save the project privately.'), m, row(resend, save));
+      return;
+    }
+    function row(...els) { const r = h('div', 'row'); r.append(...els); return r; }
+    // make sure the latest version is in the cloud (asks before overwriting / offers Save as new)
+    show(h('div', 'loading', 'Saving the latest version to your cloud…'));
+    const id = await this.saveToCloud(); if (!id) { close(); return; }
+    let meta; try { meta = await cloud.meta(id); } catch (e) { show(h('div', 'err-text', 'Couldn’t load sharing details: ' + e.message)); return; }
+    const sharedView = shareId => {
+      const url = shareUrl(shareId), emb = embedUrl(shareId);
+      const link = h('input'); link.readOnly = true; link.value = url; link.className = 'mono share-link';
+      const copyL = h('button', 'primary', 'Copy link'); copyL.onclick = () => this.copy(url, 'Link copied');
+      const openP = h('a', 'btn', 'Open page ↗'); openP.href = url; openP.target = '_blank'; openP.rel = 'noopener';
+      const snippet = `<iframe src="${emb}" width="482" height="412" style="border:0;border-radius:12px;max-width:100%" allowfullscreen loading="lazy" title="${this.project.name.replace(/[<>&"]/g, '')} (Kindlr)"></iframe>`;
+      const ta = h('textarea', 'mono embed-code'); ta.readOnly = true; ta.value = snippet; ta.rows = 3;
+      const copyE = h('button', '', 'Copy embed code'); copyE.onclick = () => this.copy(snippet, 'Embed code copied');
+      let qr = h('div', 'qr-placeholder loading', 'QR code…');
+      const dl = h('button', 'small', 'Download QR'); dl.disabled = true; dl.onclick = () => { const a = h('a'); a.href = qr.toDataURL('image/png'); a.download = 'kindlr-qr.png'; a.click(); };
+      lazyQr().then(m => { const c = m.qrCanvas(url, { size: 200 }); qr.replaceWith(c); qr = c; dl.disabled = false; }).catch(() => { qr.textContent = 'QR code unavailable'; });
+      const unshare = h('button', 'danger', 'Unshare (revoke link)');
+      unshare.onclick = async () => { if (!(await this.confirm('Unshare? The link, embeds and QR code stop working and the project leaves Explore. Sharing again later creates a new link.'))) return; try { await cloud.unshare(id); this.toast('Link revoked'); formView({ ...meta, is_public: false, share_id: null }); } catch (e) { this.toast(e.message); } };
+      const qrBox = h('div', 'qr-box'); qrBox.append(qr, dl);
+      const left = h('div', 'share-left');
+      left.append(h('p', 'ok-text', '✓ Public. Anyone with the link can view, run and remix it.'), h('label', '', 'Link'), row(link, copyL, openP), h('label', '', 'Embed on a website'), ta, row(copyE), row(unshare));
+      const grid = h('div', 'share-grid'); grid.append(left, qrBox); show(grid);
+    };
+    const formView = m => {
+      const title = h('input'); title.value = m.name || this.project.name; title.maxLength = LIMITS.maxNameLength;
+      const desc = h('textarea'); desc.rows = 2; desc.maxLength = 1000; desc.value = m.description || ''; desc.placeholder = 'What is this project? (shown on the public page and Explore)';
+      const notes = h('textarea'); notes.rows = 3; notes.maxLength = 5000; notes.value = m.notes || ''; notes.placeholder = 'Instructions, e.g. "Press Ignite, then use the arrow keys."';
+      const agree = h('input'); agree.type = 'checkbox'; agree.id = 'share-agree';
+      const lab = h('label', 'check'); lab.append(agree, ' I understand this makes the project public: anyone with the link can see, run and remix it, and it will be listed on Explore.');
+      const step = h('button', 'primary', 'Make public…'); step.disabled = true; const err = h('div', 'err-text');
+      let armed = false;
+      agree.onchange = () => { step.disabled = !agree.checked; if (!agree.checked) { armed = false; step.textContent = 'Make public…'; } };
+      step.onclick = async () => {
+        if (!armed) { armed = true; step.textContent = 'Yes, publish now'; step.classList.add('danger'); return; }   // explicit second click
+        step.disabled = true; err.textContent = '';
+        try { const r = await cloud.publish(id, { title: title.value.trim(), description: desc.value, notes: notes.value }); meta = { ...meta, is_public: true, share_id: r.share_id, name: title.value.trim() || meta.name, description: desc.value, notes: notes.value };
+          if (title.value.trim() && title.value.trim() !== this.project.name) { this.project.name = title.value.trim(); $('project-name').value = this.project.name; this.setCloudRef({ ...this.cloudRef, name: this.project.name }); this.changed(false); }
+          this.toast('Project is public'); sharedView(r.share_id); }
+        catch (e) { err.textContent = e.message; step.disabled = false; armed = false; step.textContent = 'Make public…'; step.classList.remove('danger'); }
+      };
+      show(h('p', 'hint', 'Your project is private. Add details, then publish to get a link, an embed code and a QR code.'),
+        h('label', '', 'Title'), title, h('label', '', 'Description'), desc, h('label', '', 'Notes & instructions'), notes, lab, err, row(step));
+    };
+    if (meta.is_public && meta.share_id) sharedView(meta.share_id); else formView(meta);
+  }
+  copy(text, msg) { (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject()).then(() => this.toast(msg), () => this.toast('Copy failed: select the text and copy it manually')); }
+  choose(title, msg, buttons) {
+    return new Promise(res => { const { box, close } = this.modal(title); box.appendChild(h('p', '', msg)); const a = h('div', 'actions');
+      for (const [v, label, cls] of buttons) { const b = h('button', cls || (v === buttons[buttons.length - 1][0] ? 'primary' : ''), label); b.onclick = () => { close(); res(v); }; a.appendChild(b); }
+      box.appendChild(a); });
+  }
+  async loadShared(id) {
+    try { const r = await cloud.shared(id); const p = validateProject(r.data); const json = JSON.stringify(p);
+      // "See inside" loads a copy that is NOT linked to any cloud project (Save creates a new one).
+      openPlayer(this, json, { title: `${r.title} by ${r.author}`, onSeeInside: () => this.loadProject(p, false, null) }); }
+    catch (e) { this.toast('Could not open shared project: ' + e.message); }
+  }
 
   // ------------------------------------------------ console & storage
   print(text) {
@@ -506,19 +768,39 @@ class App {
     $('con-count').textContent = out.childNodes.length + ' line' + (out.childNodes.length === 1 ? '' : 's'); out.scrollTop = out.scrollHeight;
   }
   clearConsole() { $('console-out').innerHTML = ''; $('con-count').textContent = ''; }
-  storeGet(k) { return this.project.storage ? this.project.storage[k] : undefined; }
+  storeGet(k) { return get(this.project.storage, k); }
   storeSet(k, v) {
     if (v && typeof v === 'object') v = JSON.stringify(v);
     const st = this.project.storage || (this.project.storage = {});
-    if (!(k in st) && Object.keys(st).length >= LIMITS.maxStorageKeys) { this.toast('Project storage is full'); return; }
-    st[k] = v; this.changed(false);
+    if (RESERVED_NAMES.has(k)) return;
+    if (!has(st, k) && Object.keys(st).length >= LIMITS.maxStorageKeys) { this.toast('Project storage is full'); return; }
+    put(st, k, v); this.changed(false);
   }
 
   // ------------------------------------------------ dialogs
   modal(title) {
-    const bg = h('div', 'modal-bg'), box = h('div', 'modal'); box.appendChild(h('h3', '', title)); bg.appendChild(box); $('modal-root').appendChild(bg);
-    const close = () => bg.remove(); bg.addEventListener('pointerdown', e => { if (e.target === bg) close(); });
-    bg.addEventListener('keydown', e => { if (e.key === 'Escape') close(); e.stopPropagation(); });
+    const prev = document.activeElement;
+    const bg = h('div', 'modal-bg'), box = h('div', 'modal'); const id = 'dlg-' + Math.random().toString(36).slice(2, 8);
+    box.setAttribute('role', 'dialog'); box.setAttribute('aria-modal', 'true'); box.setAttribute('aria-labelledby', id); box.tabIndex = -1;
+    const head = h('div', 'modal-head'); const t = h('h3', '', title); t.id = id;
+    const x = h('button', 'ghost modal-x', '×'); x.setAttribute('aria-label', 'Close dialog'); x.title = 'Close (Esc)';
+    head.append(t, x); box.appendChild(head); bg.appendChild(box); $('modal-root').appendChild(bg);
+    const focusables = () => [...box.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')].filter(e => !e.disabled && !e.hidden && e.offsetParent !== null);
+    const close = () => { if (!bg.isConnected) return; bg.remove(); if (prev && prev.isConnected && typeof prev.focus === 'function') prev.focus(); };
+    x.onclick = close;
+    bg.addEventListener('pointerdown', e => { if (e.target === bg) close(); });
+    bg.addEventListener('keydown', e => {
+      if (e.key === 'Escape') { e.preventDefault(); close(); }
+      else if (e.key === 'Tab') {   // keep focus inside the dialog
+        const f = focusables(); if (!f.length) { e.preventDefault(); return; }
+        const first = f[0], last = f[f.length - 1];
+        if (e.shiftKey && (document.activeElement === first || !box.contains(document.activeElement))) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && (document.activeElement === last || !box.contains(document.activeElement))) { e.preventDefault(); first.focus(); }
+      }
+      e.stopPropagation();
+    });
+    // initial focus: first form field, else first non-close button, else the dialog itself
+    setTimeout(() => { if (!bg.isConnected || box.contains(document.activeElement)) return; const f = focusables().filter(e => e !== x); (f.find(e => /^(INPUT|TEXTAREA|SELECT)$/.test(e.tagName)) || f[0] || box).focus(); }, 0);
     return { bg, box, close };
   }
   form(title, fields) {
@@ -546,7 +828,7 @@ class App {
     m.style.left = x + 'px'; m.style.top = y + 'px'; document.body.appendChild(m);
     setTimeout(() => document.addEventListener('pointerdown', function off(e) { if (!m.contains(e.target)) { m.remove(); document.removeEventListener('pointerdown', off); } }), 0);
   }
-  toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(this._toastT); this._toastT = setTimeout(() => t.classList.remove('show'), 2600); }
+  toast(msg, kind) { const t = $('toast'); t.textContent = msg; t.setAttribute('role', 'status'); t.classList.toggle('err', kind === 'err' || (!kind && /^(Could not|Can’t|Cannot|Save failed|That file|That script|Copy failed)/.test(msg))); t.classList.add('show'); clearTimeout(this._toastT); this._toastT = setTimeout(() => t.classList.remove('show'), t.classList.contains('err') ? 5000 : 2600); }
 }
 
-window.blockforge = new App();
+window.kindlr = new App();

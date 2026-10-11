@@ -1,10 +1,18 @@
-// Blockforge interpreter: cooperative generator threads, one per running script.
+// Kindlr interpreter: cooperative generator threads, one per running script.
 import { DEFS, isCap } from './blocks.js';
-import { W, H, costumeOf, bounds, touchingSprite, touchingEdge, pointInSprite, touchingColor, drawSprite, drawBubble, getImg } from './stage.js';
+import { W, H, costumeOf, bounds, touchingSprite, touchingEdge, pointInSprite, touchingColor, drawSprite, drawBubble, getImg, setRenderScale } from './stage.js';
 import { LIMITS, capStr } from './limits.js';
+import { has, get, put, dict } from './safe.js';
 import { playSound, playTone, stopAll as stopAllSounds } from './audio.js';
 
 class StopThread { }
+// ---- compiled block records -------------------------------------------------------------------------------------
+// Each block is "compiled" once into a small record stored under a non-enumerable Symbol (never serialized, not copied
+// by spread/structuredClone): the handler resolved from the op Map, whether it is a generator, and ONE argument
+// evaluator closure. No source code is generated (no eval / new Function); records only hold references to the
+// fixed handler functions below. Args are still read live from the block, so editing a block in the editor is safe.
+const C = Symbol('kindlr.compiled');
+const GenFn = Object.getPrototypeOf(function* () { }).constructor;
 const num = v => { if (typeof v === 'number') return isNaN(v) ? 0 : v; if (v === true) return 1; if (!v) return 0; const n = Number(v); return isNaN(n) ? 0 : n; };
 const str = v => (v === null || v === undefined ? '' : typeof v === 'number' ? String(Math.round(v * 1e10) / 1e10) : typeof v === 'object' ? JSON.stringify(v) : String(v));
 const bool = v => v === true || (typeof v === 'number' ? v !== 0 : !(v === false || v === null || v === undefined || v === '' || v === '0' || String(v).toLowerCase() === 'false'));
@@ -23,10 +31,14 @@ export class Runtime {
     this.app = app; this.threads = []; this.clones = []; this.keys = new Set();
     this.mouse = { x: 0, y: 0, down: false }; this.timerStart = now(); this.answer = ''; this.redraw = true;
     this.ask = null; this.timerHatState = new Map();
-    this.camera = { x: 0, y: 0 }; this.drawQueue = []; this.widgets = new Map(); this.widgetsVersion = 0; this.ops = 0; this.everyState = new Map();
+    this.camera = { x: 0, y: 0 }; this.drawQueue = []; this.widgets = new Map(); this.widgetsVersion = 0; this.ops = 0; this.everyState = new Map(); this.running = false;   // running: between Ignite and Stop (gates every(...) hats)
     this.pen = document.createElement('canvas'); this.pen.width = W * 2; this.pen.height = H * 2;
     this.penCtx = this.pen.getContext('2d'); this.penCtx.scale(2, 2); this.penCtx.lineCap = 'round';
   }
+  // `redraw` (scheduler: a visual change ends a non-turbo frame) also marks the stage `dirty`; the render loop only
+  // repaints when dirty (plus a slow safety-net repaint), so an idle or non-visual project costs ~nothing per frame.
+  get redraw() { return this._redraw; }
+  set redraw(v) { this._redraw = v; if (v) this.dirty = true; }
   get project() { return this.app.project; }
   get stage() { return this.project.targets[0]; }
   sprites() { return this.project.targets.filter(t => !t.isStage); }
@@ -43,10 +55,10 @@ export class Runtime {
   // ---------- thread management ----------
   startThread(target, script, from = 0) {
     if (this.threads.length >= LIMITS.maxThreads) { this.app.toast?.('Too many scripts running'); return { done: true }; }
-    const th = { target, script, done: false, warp: 0, frames: [] };
+    const th = { target, script, done: false, warp: 0, warpStart: 0, lc: 0, frames: [], gen: null };
     th.gen = this.threadGen(th, script.blocks, from); this.threads.push(th); return th;
   }
-  *threadGen(th, blocks, from) { for (let i = from; i < blocks.length; i++) yield* this.exec(blocks[i], th); }
+  *threadGen(th, blocks, from) { yield* this.runBlocks(blocks, th, from); }
   toggleScript(target, script) {
     const ex = this.threads.find(t => t.script === script && t.target === target && !t.done);
     if (ex) { ex.done = true; this.threads = this.threads.filter(t => !t.done); return; }
@@ -58,6 +70,7 @@ export class Runtime {
   }
   startHats(op, match, only, skipRunning) {
     const started = [];
+    if (!this.hatUsed(op)) return started;     // fast path: nobody listens for this hat (no target sort, no scans)
     for (const tg of this.allTargets()) {
       if (only && tg !== only) continue;
       for (const s of this.scriptsOf(tg)) {
@@ -70,14 +83,22 @@ export class Runtime {
     }
     return started;
   }
+  // Does any script start with this hat? A plain scan of script tops (clones share their original's scripts), so it is
+  // always current and much cheaper than building/sorting the full target list and scanning threads.
+  hatUsed(op) {
+    const ts = this.project.targets;
+    for (let i = 0; i < ts.length; i++) { const sc = ts[i].scripts; for (let j = 0; j < sc.length; j++) { const top = sc[j].blocks[0]; if (top !== undefined && top.op === op) return true; } }
+    return false;
+  }
   ignite() {
+    this.frameNo = (this.frameNo || 0) + 1;
     this.stopAll(); this.timerStart = now();
-    for (const t of this.allTargets()) { t.effects = {}; t.vx = 0; t.vy = 0; t.physics = false; t.gravity = 0; t.friction = 0; }
-    this.camera = { x: 0, y: 0 }; this.everyState.clear();
+    for (const t of this.allTargets()) { t.effects = dict(); t.vx = 0; t.vy = 0; t.physics = false; t.gravity = 0; t.friction = 0; }
+    this.camera = { x: 0, y: 0 }; this.everyState.clear(); this.running = true;
     this.redraw = true; this.startHats('ev_ignite');
   }
   stopAll() {
-    for (const t of this.threads) t.done = true; this.threads = [];
+    for (const t of this.threads) t.done = true; this.threads = []; this.running = false; this.everyState.clear();
     this.clones = []; for (const t of this.allTargets()) t.bubble = null;
     stopAllSounds(); this.ask = null; this.app.hideAsk(); this.redraw = true; this.normalizeLayers();
     this.widgets.clear(); this.widgetsVersion++; this.drawQueue = [];
@@ -97,8 +118,9 @@ export class Runtime {
 
   // ---------- scheduler ----------
   step() {
-    const start = now(); this.redraw = false; this.ops = 0;
+    const start = now(); this.redraw = false; this.ops = 0; this.frameNo = (this.frameNo || 0) + 1;
     this.checkTimerHats(); this.stepPhysics();
+    if (this.drawQueue.length) this.dirty = true;
     this.drawQueue = []; for (const th of this.startHats('ga_draw', null, null, true)) { th.warp = 1; th.warpStart = start; }
     let guard = 0;
     while (this.threads.length && guard++ < 10000) {
@@ -107,7 +129,7 @@ export class Runtime {
         if (th.done) continue; this.cur = th;
         const t0 = now();
         try { const r = th.gen.next(); if (r.done) th.done = true; else if (r.value !== 'wait') active = true; }
-        catch (e) { th.done = true; if (!(e instanceof StopThread)) { console.warn('[Blockforge runtime]', e); this.app.toast('Runtime error: ' + e.message); } }
+        catch (e) { th.done = true; if (!(e instanceof StopThread)) { console.warn('[Kindlr runtime]', e); this.app.toast('Runtime error: ' + e.message); } }
         if (now() - t0 > LIMITS.watchdogMs) { this.stopAll(); this.app.toast('Watchdog: project stopped (a script ran too long without pausing)'); return; }
       }
       this.threads = this.threads.filter(t => !t.done);
@@ -115,6 +137,8 @@ export class Runtime {
     }
   }
   checkTimerHats() {
+    const hasTimer = this.hatUsed('ev_timer'), hasEvery = this.hatUsed('ev_every');
+    if (!hasTimer && !hasEvery) return;      // fast path: no timer hats → no per-frame target sort / scans
     const t = (now() - this.timerStart) / 1000;
     for (const tg of this.allTargets()) for (const s of this.scriptsOf(tg)) {
       const top = s.blocks[0]; if (!top || top.op !== 'ev_timer') continue;
@@ -122,7 +146,7 @@ export class Runtime {
       const prev = this.timerHatState.get(key) || false; this.timerHatState.set(key, v);
       if (v && !prev && !tg.isClone) this.startHats('ev_timer', b => b === top, tg);
     }
-    if (!this.threads.length && !this.everyState.size) return;
+    if (!this.running) return;               // every(...) fires only after Ignite, until Stop (even with no other scripts running)
     for (const tg of this.allTargets()) for (const s of this.scriptsOf(tg)) {
       const top = s.blocks[0]; if (!top || top.op !== 'ev_every') continue;
       const period = Math.max(0.02, num(this.evalArg(top.args[0], { target: tg, frames: [] }))) * 1000;
@@ -140,31 +164,58 @@ export class Runtime {
   }
 
   // ---------- evaluation ----------
-  evalArg(a, th) { return a && typeof a === 'object' && a.op ? this.evalBlock(a, th) : a; }
+  // compile a block once (see C above); `rt.cur` is the running thread whenever a handler or its `a(i)` runs.
+  compile(b, map) {
+    const f = map.get(b.op) || null; const rt = this;
+    const rec = {
+      b, f, map, gen: f !== null && f instanceof GenFn,
+      // a(i): evaluate input i of THIS block for the current thread; literal inputs are returned as-is.
+      a: i => { const x = b.args[i]; return x !== null && typeof x === 'object' && x.op !== undefined ? rt.evalBlock(x, rt.cur) : x; },
+      def: null, defBase: null, defFrame: -1,
+    };
+    Object.defineProperty(b, C, { value: rec, configurable: true, writable: true, enumerable: false });
+    return rec;
+  }
+  evalArg(a, th) { return a !== null && typeof a === 'object' && a.op !== undefined ? this.evalBlock(a, th) : a; }
   evalBlock(b, th) {
-    const f = REPORTERS[b.op]; if (!f) return '';
-    return f.call(this, b, th, i => this.evalArg(b.args[i], th));
+    let c = b[C]; if (c === undefined || c.b !== b || c.map !== REP_MAP) c = this.compile(b, REP_MAP);
+    if (c.f === null) return '';
+    this.cur = th; return c.f.call(this, b, th, c.a);
   }
-  *exec(b, th) {
-    if (th.done) throw new StopThread();
-    if (++this.ops > LIMITS.maxOpsPerFrame) yield 'budget';
-    const f = STACK[b.op]; if (!f) return;
-    const r = f.call(this, b, th, i => this.evalArg(b.args[i], th));
-    if (r && typeof r.next === 'function') yield* r;
+  *exec(b, th) { yield* this.runBlocks([b], th, 0); }
+  // The statement loop: plain (non-generator) handlers run inline with no generator allocation per block;
+  // only generator handlers (loops, waits, custom blocks…) are delegated with yield*.
+  *runBlocks(blocks, th, from) {
+    for (let i = from; i < blocks.length; i++) {
+      const b = blocks[i];
+      if (th.done) throw new StopThread();
+      if (++this.ops > LIMITS.maxOpsPerFrame) yield 'budget';
+      let c = b[C]; if (c === undefined || c.b !== b || c.map !== STACK_MAP) c = this.compile(b, STACK_MAP);
+      if (c.f === null) continue;
+      this.cur = th;
+      if (c.gen) yield* c.f.call(this, b, th, c.a);
+      else { const r = c.f.call(this, b, th, c.a); if (r !== undefined && r !== null && typeof r.next === 'function') yield* r; }
+    }
   }
-  *runBody(blocks, th) { if (blocks) for (const b of blocks) yield* this.exec(b, th); }
-  *loopYield(th) { if (th.warp > 0 && now() - th.warpStart < 500) return; yield; }
+  *runBody(blocks, th) { if (blocks) yield* this.runBlocks(blocks, th, 0); }
+  // Should a loop iteration yield to the scheduler? In no-refresh (define!) mode only after 500 ms; the clock is read
+  // every 32 iterations so tight loops don't pay for performance.now() each time.
+  loopShouldYield(th) {
+    if (th.warp > 0) { if ((th.lc = (th.lc + 1) & 31) !== 0) return false; return now() - th.warpStart >= 500; }
+    return true;
+  }
+  *loopYield(th) { if (this.loopShouldYield(th)) yield; }
   *waitSecs(secs) { const end = now() + Math.max(0, secs) * 1000; do { yield 'wait'; } while (now() < end); }
 
   // ---------- variables ----------
   varHost(t, name, kind = 'variables') {
-    if (t[kind] && Object.prototype.hasOwnProperty.call(t[kind], name)) return t[kind];
-    const st = this.stage[kind]; if (!Object.prototype.hasOwnProperty.call(st, name)) st[name] = kind === 'lists' ? [] : 0;
+    if (has(t[kind], name)) return t[kind];
+    const st = this.stage[kind]; if (!has(st, name)) put(st, name, kind === 'lists' ? [] : 0);
     return st;
   }
-  getVar(t, n) { return this.varHost(t, n)[n]; }
-  setVar(t, n, v) { this.varHost(t, n)[n] = capStr(v); }
-  getList(t, n) { return this.varHost(t, n, 'lists')[n]; }
+  getVar(t, n) { return get(this.varHost(t, n), n); }
+  setVar(t, n, v) { put(this.varHost(t, n), n, capStr(v)); }
+  getList(t, n) { const h = this.varHost(t, n, 'lists'); let l = get(h, n); if (!Array.isArray(l)) l = put(h, n, []); return l; }
 
   // ---------- sprite helpers ----------
   findSprite(name) { return this.sprites().find(s => s.name === name); }
@@ -202,7 +253,7 @@ export class Runtime {
   makeClone(src) {
     if (this.clones.length >= LIMITS.maxClones) return;
     const base = src.base || src;
-    const c = { ...src, base, isClone: true, variables: structuredClone(src.variables || {}), lists: structuredClone(src.lists || {}), effects: { ...(src.effects || {}) }, bubble: null, layer: (src.layer || 0) - 0.5 };
+    const c = { ...src, base, isClone: true, variables: dict(structuredClone(src.variables || {})), lists: dict(structuredClone(src.lists || {})), effects: dict(src.effects), bubble: null, layer: (src.layer || 0) - 0.5 };
     delete c.scripts; delete c.costumes;
     this.clones.push(c); this.normalizeLayers(); this.startHats('ct_cloned', null, c); this.redraw = true;
   }
@@ -212,13 +263,13 @@ export class Runtime {
   }
 
   // ---------- rendering ----------
-  drawScene(ctx, exclude) {
+  drawScene(ctx, exclude, order) {
     const bd = costumeOf(this.stage);
     ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
     if (bd) { const im = getImg(bd.src, () => (this.redraw = true)); if (im._ok) { ctx.save(); ctx.filter = 'none'; drawSprite(ctx, { ...this.stage, x: 0, y: 0, size: 100, direction: 90, rotationStyle: "don't rotate", effects: this.stage.effects }); ctx.restore(); } }
     ctx.save(); ctx.translate(-this.camera.x, this.camera.y);
     ctx.drawImage(this.pen, 0, 0, W, H);
-    for (const s of this.drawOrder()) if (s !== exclude && s.visible) { getImg(costumeOf(s)?.src || '', () => (this.redraw = true)); drawSprite(ctx, s); }
+    for (const s of order || this.drawOrder()) if (s !== exclude && s.visible) { const c = costumeOf(s); if (c) getImg(c.src, () => (this.redraw = true)); drawSprite(ctx, s); }
     if (!exclude) this.drawShapes(ctx);
     ctx.restore();
   }
@@ -233,9 +284,14 @@ export class Runtime {
     }
   }
   render(ctx) {
-    this.drawScene(ctx);
-    ctx.save(); ctx.translate(-this.camera.x, this.camera.y); for (const s of this.drawOrder()) drawBubble(ctx, s); ctx.restore();
+    const tf = typeof ctx.getTransform === 'function' ? ctx.getTransform() : null; setRenderScale(tf && tf.a);
+    const order = this.drawOrder();          // sorted once per frame, shared by sprites and bubbles
+    this.drawScene(ctx, null, order);
+    ctx.save(); ctx.translate(-this.camera.x, this.camera.y); for (const s of order) if (s.bubble) drawBubble(ctx, s); ctx.restore();
+    this.dirty = false; this.lastRender = now();
   }
+  // Should the render loop repaint this frame?
+  needsRender() { return this.dirty || now() - (this.lastRender || 0) > 500; }
   queueDraw(d) { if (this.drawQueue.length < 5000) { this.drawQueue.push(d); this.redraw = true; } }
   widget(name) { return this.widgets.get(str(name)); }
   addWidget(w) { if (this.widgets.size >= 100 && !this.widgets.has(w.name)) return; this.widgets.set(w.name, w); this.widgetsVersion++; }
@@ -287,9 +343,9 @@ const STACK = {
   lo_nextbackdrop() { this.setCostume(this.stage, 'next backdrop'); },
   lo_chsize(b, th, a) { th.target.size = Math.max(5, Math.min(500, th.target.size + num(a(0)))); this.redraw = true; },
   lo_setsize(b, th, a) { th.target.size = Math.max(5, Math.min(500, num(a(0)))); this.redraw = true; },
-  lo_cheffect(b, th, a) { const e = th.target.effects ||= {}; const k = str(a(0)); e[k] = (e[k] || 0) + num(a(1)); this.redraw = true; },
-  lo_seteffect(b, th, a) { const e = th.target.effects ||= {}; e[str(a(0))] = num(a(1)); this.redraw = true; },
-  lo_cleareffects(b, th) { th.target.effects = {}; this.redraw = true; },
+  lo_cheffect(b, th, a) { const e = th.target.effects ||= dict(); const k = str(a(0)); put(e, k, (num(get(e, k)) || 0) + num(a(1))); this.redraw = true; },
+  lo_seteffect(b, th, a) { const e = th.target.effects ||= dict(); put(e, str(a(0)), num(a(1))); this.redraw = true; },
+  lo_cleareffects(b, th) { th.target.effects = dict(); this.redraw = true; },
   lo_show(b, th) { th.target.visible = true; this.redraw = true; },
   lo_hide(b, th) { th.target.visible = false; this.redraw = true; },
   lo_front(b, th, a) { th.target.layer = a(0) === 'back' ? -1e9 : 1e9; this.normalizeLayers(); this.redraw = true; },
@@ -306,14 +362,14 @@ const STACK = {
   so_tempo(b, th, a) { this.stage.tempo = Math.max(20, Math.min(500, num(a(0)))); },
   // control
   *ct_wait(b, th, a) { yield* this.waitSecs(num(a(0))); },
-  *ct_repeat(b, th, a) { const n = Math.round(num(a(0))); for (let i = 0; i < n; i++) { yield* this.runBody(b.body, th); yield* this.loopYield(th); } },
-  *ct_forever(b, th) { for (;;) { yield* this.runBody(b.body, th); yield* this.loopYield(th); } },
-  *ct_if(b, th, a) { if (bool(a(0))) yield* this.runBody(b.body, th); },
-  *ct_ifelse(b, th, a) { if (bool(a(0))) yield* this.runBody(b.body, th); else yield* this.runBody(b.body2, th); },
+  *ct_repeat(b, th, a) { const n = Math.round(num(a(0))); for (let i = 0; i < n; i++) { if (b.body) yield* this.runBlocks(b.body, th, 0); if (this.loopShouldYield(th)) yield; } },
+  *ct_forever(b, th) { for (;;) { if (b.body) yield* this.runBlocks(b.body, th, 0); if (this.loopShouldYield(th)) yield; } },
+  *ct_if(b, th, a) { if (bool(a(0)) && b.body) yield* this.runBlocks(b.body, th, 0); },
+  *ct_ifelse(b, th, a) { const body = bool(a(0)) ? b.body : b.body2; if (body) yield* this.runBlocks(body, th, 0); },
   *ct_waituntil(b, th, a) { while (!bool(a(0))) yield 'wait'; },
-  *ct_until(b, th, a) { while (!bool(a(0))) { yield* this.runBody(b.body, th); yield* this.loopYield(th); } },
-  *ct_while(b, th, a) { while (bool(a(0))) { yield* this.runBody(b.body, th); yield* this.loopYield(th); } },
-  *ct_for(b, th, a) { const name = str(a(0)); const n = Math.round(num(a(1))); for (let i = 1; i <= n; i++) { this.setVar(th.target, name, i); yield* this.runBody(b.body, th); yield* this.loopYield(th); } },
+  *ct_until(b, th, a) { while (!bool(a(0))) { if (b.body) yield* this.runBlocks(b.body, th, 0); if (this.loopShouldYield(th)) yield; } },
+  *ct_while(b, th, a) { while (bool(a(0))) { if (b.body) yield* this.runBlocks(b.body, th, 0); if (this.loopShouldYield(th)) yield; } },
+  *ct_for(b, th, a) { const name = str(a(0)); const n = Math.round(num(a(1))); for (let i = 1; i <= n; i++) { this.setVar(th.target, name, i); if (b.body) yield* this.runBlocks(b.body, th, 0); if (this.loopShouldYield(th)) yield; } },
   ct_stop(b, th, a) {
     const o = str(a(0));
     if (o === 'all') { this.stopAll(); throw new StopThread(); }
@@ -334,7 +390,7 @@ const STACK = {
   se_resettimer() { this.timerStart = now(); },
   // variables
   va_set(b, th, a) { this.setVar(th.target, str(a(0)), a(1)); },
-  va_change(b, th, a) { const n = str(a(0)); this.setVar(th.target, n, num(this.getVar(th.target, n)) + num(a(1))); },
+  va_change(b, th, a) { const n = str(a(0)); const h = this.varHost(th.target, n); put(h, n, capStr(num(get(h, n)) + num(a(1)))); },
   va_show(b, th, a) { this.app.setMonitor('var', str(a(0)), th.target, true); },
   va_hide(b, th, a) { this.app.setMonitor('var', str(a(0)), th.target, false); },
   // lists
@@ -357,21 +413,28 @@ const STACK = {
   // my blocks
   *call(b, th) {
     const base = th.target.base || th.target;
-    const def = base.scripts.find(s => s.blocks[0]?.op === 'define' && s.blocks[0].name === b.name);
-    if (!def) return; const d = def.blocks[0]; const frame = {};
+    // definition lookup cached on the call block's record, revalidated once per frame (scripts may change in the editor)
+    const c = b[C]; let def = c && c.b === b && c.defBase === base && c.defFrame === this.frameNo ? c.def : undefined;
+    if (def === undefined) {
+      def = null; const sc = base.scripts;
+      for (let i = 0; i < sc.length; i++) { const top = sc[i].blocks[0]; if (top && top.op === 'define' && top.name === b.name) { def = sc[i]; break; } }
+      if (c && c.b === b) { c.def = def; c.defBase = base; c.defFrame = this.frameNo; }
+    }
+    if (!def) return; const d = def.blocks[0];
     if (th.frames.length >= LIMITS.maxCallDepth) throw new Error(`Custom block recursion deeper than ${LIMITS.maxCallDepth}`);
-    (d.params || []).forEach((p, i) => (frame[p] = this.evalArg(b.args[i], th)));
+    const frame = Object.create(null); const params = d.params;
+    if (params) for (let i = 0; i < params.length; i++) frame[params[i]] = this.evalArg(b.args[i], th);
     th.frames.push(frame); if (d.warp) { if (!th.warp) th.warpStart = now(); th.warp++; }
-    try { for (let i = 1; i < def.blocks.length; i++) yield* this.exec(def.blocks[i], th); }
-    finally { th.frames.pop(); if (d.warp) th.warp--; }
+    try { yield* this.runBlocks(def.blocks, th, 1); }
+    finally { th.frames.pop(); if (d.warp) th.warp--; this.cur = th; }
   },
 };
-const getMap = (rt, t, n) => { const h = rt.varHost(t, n); let v = h[n]; if (!v || typeof v !== 'object' || Array.isArray(v)) { v = Object.create(null); h[n] = v; } return v; };
+const getMap = (rt, t, n) => { const h = rt.varHost(t, n); let v = get(h, n); if (!v || typeof v !== 'object' || Array.isArray(v)) v = put(h, n, Object.create(null)); return v; };
 function plainFromJson(text) {
   const v = JSON.parse(String(text).slice(0, LIMITS.maxStringLength));
   if (v === null || typeof v !== 'object') return v;
   const out = Object.create(null); let n = 0;
-  for (const [k, x] of Object.entries(v)) { if (++n > LIMITS.maxMapKeys) break; out[k] = x !== null && typeof x === 'object' ? JSON.stringify(x) : capStr(x); }
+  for (const [k, x] of Object.entries(v)) { if (++n > LIMITS.maxMapKeys) break; put(out, k, x !== null && typeof x === 'object' ? JSON.stringify(x) : capStr(x)); }
   return out;
 }
 Object.assign(STACK, {
@@ -387,8 +450,8 @@ Object.assign(STACK, {
   st_set(b, th, a) { this.app.storeSet?.(str(a(0)).slice(0, LIMITS.maxNameLength), capStr(a(1))); },
   dt_split(b, th, a) { const l = this.getList(th.target, str(a(2))); const sep = str(a(1)); const parts = str(a(0)).split(sep === '' ? '' : sep).slice(0, LIMITS.maxListLength); l.length = 0; l.push(...parts); },
   dt_newmap(b, th, a) { this.varHost(th.target, str(a(0)))[str(a(0))] = Object.create(null); },
-  dt_mapset(b, th, a) { const m = getMap(this, th.target, str(a(0))); const k = str(a(1)); if (!(k in m) && Object.keys(m).length >= LIMITS.maxMapKeys) return; m[k] = capStr(a(2)); },
-  dt_mapdel(b, th, a) { delete getMap(this, th.target, str(a(1)))[str(a(0))]; },
+  dt_mapset(b, th, a) { const m = getMap(this, th.target, str(a(0))); const k = str(a(1)); if (!has(m, k) && Object.keys(m).length >= LIMITS.maxMapKeys) return; put(m, k, capStr(a(2))); },
+  dt_mapdel(b, th, a) { const m = getMap(this, th.target, str(a(1))); const k = str(a(0)); if (has(m, k)) delete m[k]; },
   dt_mapkeys(b, th, a) { const l = this.getList(th.target, str(a(1))); l.length = 0; l.push(...Object.keys(getMap(this, th.target, str(a(0))))); },
   dt_fromjson(b, th, a) { let v; try { v = plainFromJson(a(1)); } catch (e) { throw new Error('Invalid JSON'); } this.setVar(th.target, str(a(0)), v); },
   ga_rect(b, th, a) { this.queueDraw({ k: 'rect', x: num(a(0)), y: num(a(1)), w: num(a(2)), h: num(a(3)), c: str(a(4)) }); },
@@ -440,10 +503,10 @@ const REPORTERS = {
   se_timer() { return Math.round((now() - this.timerStart) / 10) / 100; },
   se_of(b, th, a) {
     const p = str(a(0)), o = str(a(1)); const t = o === '_stage_' ? this.stage : this.findSprite(o); if (!t) return 0;
-    if (t.isStage) return p === 'backdrop #' ? t.costume + 1 : p === 'backdrop name' ? costumeOf(t)?.name : p === 'volume' ? t.volume ?? 100 : (t.variables[p] ?? 0);
-    return ({ 'x position': t.x, 'y position': t.y, direction: t.direction, 'costume #': t.costume + 1, 'costume name': costumeOf(t)?.name, size: t.size, volume: t.volume ?? 100 })[p] ?? (t.variables[p] ?? 0);
+    if (t.isStage) return p === 'backdrop #' ? t.costume + 1 : p === 'backdrop name' ? costumeOf(t)?.name : p === 'volume' ? t.volume ?? 100 : (get(t.variables, p) ?? 0);
+    return get({ 'x position': t.x, 'y position': t.y, direction: t.direction, 'costume #': t.costume + 1, 'costume name': costumeOf(t)?.name, size: t.size, volume: t.volume ?? 100 }, p) ?? (get(t.variables, p) ?? 0);
   },
-  se_current(b, th, a) { const d = new Date(); return ({ year: d.getFullYear(), month: d.getMonth() + 1, date: d.getDate(), 'day of week': d.getDay() + 1, hour: d.getHours(), minute: d.getMinutes(), second: d.getSeconds() })[str(a(0))] ?? 0; },
+  se_current(b, th, a) { const d = new Date(); return get({ year: d.getFullYear(), month: d.getMonth() + 1, date: d.getDate(), 'day of week': d.getDay() + 1, hour: d.getHours(), minute: d.getMinutes(), second: d.getSeconds() }, str(a(0))) ?? 0; },
   se_days() { return (Date.now() - Date.UTC(2000, 0, 1)) / 86400000; },
   op_add(b, th, a) { return num(a(0)) + num(a(1)); },
   op_sub(b, th, a) { return num(a(0)) - num(a(1)); },
@@ -478,7 +541,7 @@ const REPORTERS = {
   li_index(b, th, a) { const l = this.getList(th.target, str(a(1))); const v = str(a(0)).toLowerCase(); return l.findIndex(x => str(x).toLowerCase() === v) + 1; },
   li_length(b, th, a) { return this.getList(th.target, str(a(0))).length; },
   li_contains(b, th, a) { const l = this.getList(th.target, str(a(0))); const v = str(a(1)).toLowerCase(); return l.some(x => str(x).toLowerCase() === v); },
-  param(b, th) { const f = th.frames[th.frames.length - 1]; const n = str(b.args[0]); return f && n in f ? f[n] : ''; },
+  param(b, th) { const f = th.frames[th.frames.length - 1]; const n = str(b.args[0]); return f !== undefined && has(f, n) ? f[n] : ''; },
 };
 Object.assign(REPORTERS, {
   ui_value(b, th, a) { const w = this.widget(a(0)); return w ? (w.type === 'slider' ? num(w.value) : w.value) : ''; },
@@ -492,8 +555,8 @@ Object.assign(REPORTERS, {
   dt_sub(b, th, a) { const s = str(a(2)); return s.slice(Math.max(0, Math.round(num(a(0))) - 1), Math.max(0, Math.round(num(a(1))))); },
   dt_index(b, th, a) { return str(a(1)).toLowerCase().indexOf(str(a(0)).toLowerCase()) + 1; },
   dt_joinlist(b, th, a) { return capStr(this.getList(th.target, str(a(0))).map(str).join(str(a(1)))); },
-  dt_mapget(b, th, a) { const m = getMap(this, th.target, str(a(1))); const k = str(a(0)); return Object.prototype.hasOwnProperty.call(m, k) ? m[k] : ''; },
-  dt_maphas(b, th, a) { return Object.prototype.hasOwnProperty.call(getMap(this, th.target, str(a(0))), str(a(1))); },
+  dt_mapget(b, th, a) { const m = getMap(this, th.target, str(a(1))); const k = str(a(0)); return has(m, k) ? m[k] : ''; },
+  dt_maphas(b, th, a) { return has(getMap(this, th.target, str(a(0))), str(a(1))); },
   dt_mapsize(b, th, a) { return Object.keys(getMap(this, th.target, str(a(0)))).length; },
   dt_tojson(b, th, a) { return capStr(JSON.stringify(this.getVar(th.target, str(a(0))) ?? '')); },
   ga_vx(b, th) { return th.target.vx || 0; }, ga_vy(b, th) { return th.target.vy || 0; },
@@ -501,3 +564,6 @@ Object.assign(REPORTERS, {
   ga_roomname() { return costumeOf(this.stage)?.name || ''; },
 });
 export { str as toStr, keyName };
+// Op dispatch via Maps built from own keys only: an op like "constructor" or "__proto__" never resolves to a function.
+const STACK_MAP = new Map(Object.entries(STACK));
+const REP_MAP = new Map(Object.entries(REPORTERS));

@@ -11,3 +11,5 @@ data/
 *.log
 .DS_Store
 test-results/
+screenshots/ui-qa/
+bench/results/

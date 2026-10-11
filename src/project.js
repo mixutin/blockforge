@@ -1,4 +1,4 @@
-import { parseEmber } from './ember.js';
+import { parseKls } from './kls.js';
 import * as art from './art.js';
 import { clone } from './blocks.js';
 
@@ -20,12 +20,12 @@ export function layoutScripts(scripts, prev = []) {
   });
   return scripts;
 }
-export function withCode(target, code) { target.scripts = layoutScripts(parseEmber(code)); return target; }
+export function withCode(target, code) { target.scripts = layoutScripts(parseKls(code)); return target; }
 
 export function blankProject() {
   const stage = makeStage([art.backdrops.blank, art.backdrops.meadow]);
   const s = makeTarget('Sparky', art.sparky, { layer: 0 });
-  return { format: 'blockforge', version: 1, name: 'Untitled project', targets: [stage, s], monitors: [] };
+  return { format: 'kindlr', version: 1, name: 'Untitled project', targets: [stage, s], monitors: [] };
 }
 
 const EX1 = {
@@ -213,7 +213,7 @@ const EX4 = {
 on_ignite {
   clear_console
   ui_clear
-  ui_label("title", "Blockforge Notes", 0, 150)
+  ui_label("title", "Kindlr Notes", 0, 150)
   ui_textbox("note", 0, 105)
   ui_button("add", "Add note", -60, 62)
   ui_button("clear", "Clear all", 60, 62)
@@ -302,20 +302,20 @@ on_draw {
 
 export function exampleProjects() {
   const b = art.backdrops;
-  const p1 = { format: 'blockforge', version: 1, name: 'Hello Sparky', monitors: [{ type: 'var', name: 'bounces', owner: null, visible: true, x: 6, y: 6 }],
+  const p1 = { format: 'kindlr', version: 1, name: 'Hello Sparky', monitors: [{ type: 'var', name: 'bounces', owner: null, visible: true, x: 6, y: 6 }],
     targets: [withCode(makeStage([b.meadow, b.sunset, b.night], { variables: { bounces: 0 } }), EX1.stage),
       withCode(makeTarget('Sparky', art.sparky, { y: -40, direction: 45, layer: 1 }), EX1.sparky),
       withCode(makeTarget('Bolt', art.bolt, { x: -150, y: 100, size: 80, layer: 0 }), EX1.bolt)] };
-  const p2 = { format: 'blockforge', version: 1, name: 'Star Catcher', monitors: [{ type: 'var', name: 'score', owner: null, visible: true, x: 6, y: 6 }, { type: 'var', name: 'lives', owner: null, visible: true, x: 6, y: 36 }],
+  const p2 = { format: 'kindlr', version: 1, name: 'Star Catcher', monitors: [{ type: 'var', name: 'score', owner: null, visible: true, x: 6, y: 6 }, { type: 'var', name: 'lives', owner: null, visible: true, x: 6, y: 36 }],
     targets: [withCode(makeStage([b.night, b.sunset], { variables: { score: 0, lives: 5 } }), EX2.stage),
       withCode(makeTarget('Sparky', art.sparky, { y: -135, size: 60, rotationStyle: 'left-right', layer: 1 }), EX2.sparky),
       withCode(makeTarget('Star', art.star, { y: 170, visible: false, layer: 0 }), EX2.star)] };
-  const p3 = { format: 'blockforge', version: 1, name: 'Pen Art Lab', monitors: [{ type: 'var', name: 'rings', owner: null, visible: true, x: 6, y: 6 }, { type: 'list', name: 'palette', owner: null, visible: true, x: 370, y: 6 }],
+  const p3 = { format: 'kindlr', version: 1, name: 'Pen Art Lab', monitors: [{ type: 'var', name: 'rings', owner: null, visible: true, x: 6, y: 6 }, { type: 'list', name: 'palette', owner: null, visible: true, x: 370, y: 6 }],
     targets: [withCode(makeStage([b.grid, b.blank], { variables: { rings: 0, sides: 6 }, lists: { palette: [] } }), EX3.stage),
       withCode(makeTarget('Pointer', art.arrow, { size: 70, layer: 0 }), EX3.pointer)] };
-  const p4 = { format: 'blockforge', version: 1, name: 'Notes App (program mode)', storage: {}, monitors: [{ type: 'list', name: 'notes', owner: null, visible: true, x: 370, y: 6 }],
+  const p4 = { format: 'kindlr', version: 1, name: 'Notes App (program mode)', storage: {}, monitors: [{ type: 'list', name: 'notes', owner: null, visible: true, x: 370, y: 6 }],
     targets: [withCode(makeStage([b.blank, b.grid], { variables: { visits: 0, stats: 0, i: 0 }, lists: { notes: [] } }), EX4.stage)] };
-  const p5 = { format: 'blockforge', version: 1, name: 'Physics Playground', monitors: [],
+  const p5 = { format: 'kindlr', version: 1, name: 'Physics Playground', monitors: [],
     targets: [withCode(makeStage([b.night]), EX5.stage), withCode(makeTarget('Ball', art.ball, { y: 120 }), EX5.ball)] };
   return [p1, p2, p3, p4, p5];
 }

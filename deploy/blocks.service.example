@@ -1,6 +1,6 @@
-# Example systemd unit for the optional Blockforge Cloud API. Replace placeholders.
+# Example systemd unit for the optional Kindlr Cloud API. Replace placeholders.
 [Unit]
-Description=Blockforge Cloud API
+Description=Kindlr Cloud API
 After=network.target
 
 [Service]
@@ -14,6 +14,12 @@ Environment=HOST=127.0.0.1
 Environment=PORT=8795
 Environment=DB_PATH=/var/lib/blocks/blocks.db
 Environment=ALLOWED_ORIGIN=https://YOUR_DOMAIN
+# Links in verification / reset emails point here:
+Environment=PUBLIC_URL=https://YOUR_DOMAIN
+# Outgoing mail via a local MTA (e.g. Postfix on loopback, no auth):
+Environment=SMTP_HOST=127.0.0.1
+Environment=SMTP_PORT=25
+Environment="MAIL_FROM=Kindlr <noreply@example.com>"
 Restart=on-failure
 # Hardening: the app directory is read-only; only the DB directory is writable.
 NoNewPrivileges=true
