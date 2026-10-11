@@ -1,0 +1,13 @@
+import { chromium } from 'playwright';
+const URL = process.env.URL || 'http://localhost:5180/';
+const b = await chromium.launch(); const p = await b.newPage({ viewport: { width: 1600, height: 950 } });
+const errs = [];
+p.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') errs.push(m.type() + ': ' + m.text()); });
+p.on('pageerror', e => errs.push('pageerror: ' + e.message));
+await p.goto(URL); await p.waitForTimeout(1200);
+await p.screenshot({ path: 'screenshots/01-loaded.png' });
+await p.click('#btn-ignite'); await p.waitForTimeout(2500);
+await p.screenshot({ path: 'screenshots/02-running.png' });
+console.log('threads', await p.evaluate(() => blockforge.runtime.threads.length));
+console.log(errs.join('\n') || 'no console errors');
+await b.close();
