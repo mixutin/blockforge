@@ -1,0 +1,35 @@
+# Example systemd unit for the optional Blockforge Cloud API. Replace placeholders.
+[Unit]
+Description=Blockforge Cloud API
+After=network.target
+
+[Service]
+Type=simple
+User=blocks
+Group=blocks
+WorkingDirectory=/opt/blocks/server
+ExecStart=/usr/bin/node /opt/blocks/server/index.js
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+Environment=PORT=8795
+Environment=DB_PATH=/var/lib/blocks/blocks.db
+Environment=ALLOWED_ORIGIN=https://YOUR_DOMAIN
+Restart=on-failure
+# Hardening: the app directory is read-only; only the DB directory is writable.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=false
+ReadWritePaths=/var/lib/blocks
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target
